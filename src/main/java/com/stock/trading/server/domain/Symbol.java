@@ -1,0 +1,24 @@
+package com.stock.trading.server.domain;
+
+public enum Symbol {
+    AAPL("AAPL"),
+    MSFT("MSFT"),
+    GOOGL("GOOGL"),
+    AMZN("AMZN"),
+    TSLA("TSLA"),
+    META("META"),
+    NFLX("NFLX"),
+    NVDA("NVDA"),
+    AMD("AMD"),
+    INTEL("INTC");
+
+    private final String symbol;
+
+    Symbol(String symbol) {
+        this.symbol = symbol;
+    }
+
+    public String getSymbol() {
+        return symbol;
+    }
+}
