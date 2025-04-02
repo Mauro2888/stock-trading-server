@@ -12,13 +12,13 @@ public enum Symbol {
     AMD("AMD"),
     INTEL("INTC");
 
-    private final String symbol;
+    private final String name;
 
-    Symbol(String symbol) {
-        this.symbol = symbol;
+    Symbol(String name) {
+        this.name = name;
     }
 
-    public String getSymbol() {
-        return symbol;
+    public String getName() {
+        return name;
     }
 }

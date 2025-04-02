@@ -10,7 +10,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "stock")
-public class Stock extends BaseEntity {
+public class StockEntity extends BaseEntity {
 
     @Column(name = "name", nullable = false)
     private String name;
@@ -20,10 +20,10 @@ public class Stock extends BaseEntity {
     @Column(name = "symbol", nullable = false)
     private Symbol symbol;
 
-    public Stock() {
+    public StockEntity() {
     }
 
-    public Stock(UUID id, Instant insertDateTime, Instant updateDateTime, Long version, String name, BigDecimal price, Symbol symbol) {
+    public StockEntity(UUID id, Instant insertDateTime, Instant updateDateTime, Long version, String name, BigDecimal price, Symbol symbol) {
         super(id, insertDateTime, updateDateTime, version);
         this.name = name;
         this.price = price;

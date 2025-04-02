@@ -7,13 +7,10 @@ import com.stock.trading.server.inbound.mapper.StockTradingMapper;
 import com.stock.trading.server.inbound.model.StockResponse;
 import com.stock.trading.server.vm.StockTradingFind;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.springframework.web.context.annotation.RequestScope;
 
 import java.util.logging.Logger;
 
-@RequestScope
-@Component
+
 @Delegate
 public class StockTradingFindDelegate implements StockTradingFind {
 
