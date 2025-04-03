@@ -1,7 +1,7 @@
 package com.stock.trading.server.outbound.jpa;
 
 import com.stock.trading.server.outbound.jpa.common.BaseEntity;
-import com.stock.trading.server.domain.Symbol;
+import com.stock.trading.server.domain.model.Symbol;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;

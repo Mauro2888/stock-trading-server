@@ -1,4 +1,4 @@
-package com.stock.trading.server.domain;
+package com.stock.trading.server.domain.model;
 
 public enum Symbol {
     AAPL("AAPL"),

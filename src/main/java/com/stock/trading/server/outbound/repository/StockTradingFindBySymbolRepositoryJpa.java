@@ -1,6 +1,6 @@
 package com.stock.trading.server.outbound.repository;
 
-import com.stock.trading.server.domain.Symbol;
+import com.stock.trading.server.domain.model.Symbol;
 import com.stock.trading.server.outbound.jpa.StockEntity;
 import com.stock.trading.server.outbound.projector.StockQueryRes;
 import org.springframework.data.jpa.repository.JpaRepository;

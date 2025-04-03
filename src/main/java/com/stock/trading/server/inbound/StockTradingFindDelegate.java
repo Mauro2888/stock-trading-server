@@ -1,6 +1,6 @@
 package com.stock.trading.server.inbound;
 
-import com.stock.trading.server.domain.Symbol;
+import com.stock.trading.server.domain.model.Symbol;
 import com.stock.trading.server.domain.find.StockTradingFindSymbolService;
 import com.stock.trading.server.inbound.common.Delegate;
 import com.stock.trading.server.inbound.mapper.StockTradingMapper;

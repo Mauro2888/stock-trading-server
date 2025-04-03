@@ -1,6 +1,6 @@
 package com.stock.trading.server.domain.find;
 
-import com.stock.trading.server.domain.Symbol;
+import com.stock.trading.server.domain.model.Symbol;
 import com.stock.trading.server.domain.model.Stock;
 import com.stock.trading.server.outbound.repository.StockTradingFindBySymbolRepositoryJpa;
 import org.springframework.beans.factory.annotation.Autowired;
