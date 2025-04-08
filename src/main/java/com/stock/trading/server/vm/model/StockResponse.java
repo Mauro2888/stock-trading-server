@@ -1,4 +1,4 @@
-package com.stock.trading.server.inbound.model;
+package com.stock.trading.server.vm.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -17,5 +18,5 @@ public interface StockTradingFindBySymbolRepositoryJpa extends JpaRepository<Sto
             SELECT new com.stock.trading.server.outbound.projector.StockQueryRes(s.name, s.price, s.symbol)
             FROM StockEntity s WHERE s.symbol = :symbol
             """)
-    StockQueryRes findBySymbol(@Param("symbol") Symbol symbol);
+    Optional<StockQueryRes> findBySymbol(@Param("symbol") Symbol symbol);
 }
