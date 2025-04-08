@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.stock.trading</groupId>
     <artifactId>stock-trading-server</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.1-SNAPSHOT</version>
     <name>stock-trading-server</name>
     <description>stock-trading-server</description>
     <url/>
