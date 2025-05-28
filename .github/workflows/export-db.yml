@@ -1,7 +1,7 @@
 name: Export Database Schema
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: 
 
 jobs:
   export:
@@ -14,7 +14,7 @@ jobs:
       MVN_REPO: ~/.m2/repository
 
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout Module Repository
         uses: actions/checkout@v4
@@ -39,18 +39,18 @@ jobs:
         run: |
           echo "🚀 Starting database export..."
           
-          # Start postgres con porta corretta
+          # Start postgres con configurazioni che corrispondono al tuo locale
           docker run -d --name db-temp \
-            -e POSTGRES_DB=migration-db \
-            -e POSTGRES_USER=test \
-            -e POSTGRES_PASSWORD=dbpass \
+            -e POSTGRES_DB=stock_trading \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
             -p 5432:5432 postgres:15-alpine
           
           echo "⏳ Waiting for database to start..."
           sleep 20
           
           # Test connessione
-          docker exec db-temp pg_isready -U test -d migration-db
+          docker exec db-temp pg_isready -U postgres -d stock_trading
           
           echo "🔄 Applying Liquibase migrations..."
           # Apply migrations con il path corretto
@@ -65,7 +65,7 @@ jobs:
           echo "📤 Exporting database schema..."
           # Export con pulizia migliore
           OUTPUT="database-schema.sql"
-          docker exec db-temp pg_dump -U test -d migration-db \
+          docker exec db-temp pg_dump -U postgres -d stock_trading \
             --schema-only \
             --no-comments \
             --no-owner \
@@ -76,7 +76,7 @@ jobs:
           
           # Aggiungi anche i dati se servono
           echo -e "\n-- DATA INSERTS" >> $OUTPUT
-          docker exec db-temp pg_dump -U test -d migration-db \
+          docker exec db-temp pg_dump -U postgres -d stock_trading \
             --data-only \
             --no-owner \
             --no-privileges \
@@ -105,11 +105,11 @@ jobs:
           # Verifica che ci sia qualcosa da committare
           if [ -f "exports/database-schema.sql" ]; then
             echo "📁 File trovato, committando..."
-          
+            
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
             git add exports/
-          
+            
             # Commit solo se ci sono cambiamenti
             if git diff --staged --quiet; then
               echo "ℹ️ Nessun cambiamento da committare"
