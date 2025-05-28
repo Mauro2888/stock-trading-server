@@ -1,0 +1,131 @@
+name: Export Database Schema
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export:
+    env:
+      VERSION: 4.0.0
+      GITHUB_USERNAME: Mauro2888
+      GITHUB_TOKEN: ${{ secrets.GIT_HUB_TOKEN }}
+      JAVA_PROJECT_ROOT_MODULE: maven-multi-module
+      MVN_SETTINGS: ./.github/workflows/settings.xml
+      MVN_REPO: ~/.m2/repository
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Module Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Load Common Environment Variables
+        uses: xom9ikk/dotenv@v2.3.0
+        with:
+          path: ./.github/workflows/common-env
+          load-mode: strict
+
+      - name: Setup JDK ${{ env.JAVA_DISTRIBUTION }} ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          check-latest: false
+
+      - name: Run database export
+        run: |
+          echo "🚀 Starting database export..."
+          
+          # Start postgres con porta corretta
+          docker run -d --name db-temp \
+            -e POSTGRES_DB=migration-db \
+            -e POSTGRES_USER=test \
+            -e POSTGRES_PASSWORD=dbpass \
+            -p 5432:5432 postgres:15-alpine
+          
+          echo "⏳ Waiting for database to start..."
+          sleep 20
+          
+          # Test connessione
+          docker exec db-temp pg_isready -U test -d migration-db
+          
+          echo "🔄 Applying Liquibase migrations..."
+          # Apply migrations con il path corretto
+          mvn -B --settings $MVN_SETTINGS -f $JAVA_PROJECT_ROOT_MODULE/pom.xml \
+            liquibase:update \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/migration-db" \
+            -Dliquibase.username="test" \
+            -Dliquibase.password="dbpass" \
+            -q
+          
+          echo "📤 Exporting database schema..."
+          # Export con pulizia migliore
+          OUTPUT="database-schema.sql"
+          docker exec db-temp pg_dump -U test -d migration-db \
+            --schema-only \
+            --no-comments \
+            --no-owner \
+            --no-privileges \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock | \
+          sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' > $OUTPUT
+          
+          # Aggiungi anche i dati se servono
+          echo -e "\n-- DATA INSERTS" >> $OUTPUT
+          docker exec db-temp pg_dump -U test -d migration-db \
+            --data-only \
+            --no-owner \
+            --no-privileges \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock \
+            --column-inserts | \
+          grep "^INSERT" >> $OUTPUT
+          
+          # Mostra info sul file generato
+          echo "✅ Export completed: $OUTPUT"
+          echo "📊 File size: $(du -h $OUTPUT | cut -f1)"
+          echo "📋 Lines: $(wc -l < $OUTPUT)"
+          echo ""
+          echo "🔍 First 10 lines:"
+          head -10 $OUTPUT
+          
+          # Cleanup
+          docker stop db-temp && docker rm db-temp
+
+      - name: Commit to repository
+        run: |
+          # Crea cartella exports se non esiste
+          mkdir -p exports
+          mv *.sql exports/
+          
+          # Verifica che ci sia qualcosa da committare
+          if [ -f "exports/database-schema.sql" ]; then
+            echo "📁 File trovato, committando..."
+          
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add exports/
+          
+            # Commit solo se ci sono cambiamenti
+            if git diff --staged --quiet; then
+              echo "ℹ️ Nessun cambiamento da committare"
+            else
+              git commit -m "📄 Auto-generated database schema $(date '+%Y-%m-%d %H:%M:%S')"
+              git push
+              echo "✅ File committato in exports/database-schema.sql"
+            fi
+          else
+            echo "❌ File SQL non trovato!"
+            ls -la exports/
+          fi
+
+      - name: Upload as artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-schema-$(date +%Y%m%d-%H%M%S)
+          path: "exports/*.sql"
+          retention-days: 30
