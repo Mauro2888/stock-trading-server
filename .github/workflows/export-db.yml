@@ -58,8 +58,8 @@ jobs:
             liquibase:update \
             -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
             -Dliquibase.url="jdbc:postgresql://localhost:5432/migration-db" \
-            -Dliquibase.username="test" \
-            -Dliquibase.password="dbpass" \
+            -Dliquibase.username="postgres" \
+            -Dliquibase.password="postgres" \
             -q
           
           echo "📤 Exporting database schema..."
