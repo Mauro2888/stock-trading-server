@@ -9,7 +9,7 @@ jobs:
       VERSION: 4.0.0
       GITHUB_USERNAME: Mauro2888
       GITHUB_TOKEN: ${{ secrets.GIT_HUB_TOKEN }}
-      JAVA_PROJECT_ROOT_MODULE: maven-multi-module
+      #JAVA_PROJECT_ROOT_MODULE: maven-multi-module
       MVN_SETTINGS: ./.github/workflows/settings.xml
       MVN_REPO: ~/.m2/repository
 
@@ -54,7 +54,7 @@ jobs:
           
           echo "🔄 Applying Liquibase migrations..."
           # Apply migrations con il path corretto
-          mvn -B --settings $MVN_SETTINGS -f $JAVA_PROJECT_ROOT_MODULE/pom.xml \
+          mvn -B --settings $MVN_SETTINGS -f pom.xml \
             liquibase:update \
             -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
             -Dliquibase.url="jdbc:postgresql://localhost:5432/migration-db" \
