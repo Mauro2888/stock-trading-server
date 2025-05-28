@@ -56,7 +56,7 @@ jobs:
           # Apply migrations con il path corretto
           mvn -B --settings $MVN_SETTINGS -f pom.xml \
             liquibase:update \
-            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yaml" \
             -Dliquibase.url="jdbc:postgresql://localhost:5432/migration-db" \
             -Dliquibase.username="test" \
             -Dliquibase.password="dbpass" \
