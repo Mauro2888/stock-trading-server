@@ -1,6 +1,5 @@
 package com.stock.trading.server.vm.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.math.BigDecimal;
 
@@ -31,7 +30,6 @@ public record StockResponse(String name, String symbol, BigDecimal price) {
         }
     }
 
-    @JsonIgnore
     public static Builder builder() {
         return new Builder();
     }

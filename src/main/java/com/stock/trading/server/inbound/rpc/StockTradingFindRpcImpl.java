@@ -6,6 +6,7 @@ import com.stock.trading.server.vm.api.StockTradingFind;
 import com.stock.trading.service.inbound.StockProtoRequest;
 import com.stock.trading.service.inbound.StockProtoResponse;
 import com.stock.trading.service.inbound.StockTradingFindServiceGrpc;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.grpc.server.service.GrpcService;
@@ -30,6 +31,21 @@ public class StockTradingFindRpcImpl extends StockTradingFindServiceGrpc.StockTr
         var stockResponse = delegate.find(request.getSymbol());
         responseObserver.onNext(stockTradingFindRpcMapper.apply(stockResponse));
         responseObserver.onCompleted();
-
+        responseObserver
+                .onError(Status.NOT_FOUND
+                        .withDescription("Sorry, found no movies to recommend").asRuntimeException());
     }
+
+    @Override
+    public void subscribe(StockProtoRequest request, StreamObserver<StockProtoResponse> responseObserver) {
+
+        for (int i = 0; i < 10; i++) {
+            var stockResponse = delegate.find(request.getSymbol());
+            responseObserver.onNext(stockTradingFindRpcMapper.apply(stockResponse));
+        }
+        responseObserver.onCompleted();
+        responseObserver
+                .onError(Status.NOT_FOUND
+                        .withDescription("Sorry, found no movies to recommend").asRuntimeException());
+}
 }

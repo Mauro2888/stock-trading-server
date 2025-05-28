@@ -1,0 +1,63 @@
+name: Export Database Schema
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run database export
+        run: |
+          # Start postgres
+          docker run -d --name db-temp \
+            -e POSTGRES_DB=migration-db \
+            -e POSTGRES_USER=test \
+            -e POSTGRES_PASSWORD=dbpass \
+            -p 55432:55432 postgres:15-alpine
+          
+          sleep 15
+          
+          # Apply migrations
+          mvn liquibase:update \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.url="jdbc:postgresql://localhost:55432/migration-db" \
+            -Dliquibase.username="test" \
+            -Dliquibase.password="dbpass" -q
+          
+          # Export (sempre stesso nome = override)
+          OUTPUT="database-schema.sql"
+          docker exec db-temp pg_dump -U test -d migration-db \
+            --schema-only --no-comments \
+            --exclude-table=databasechangelog* > $OUTPUT
+          
+          echo "✅ Export completed: $OUTPUT"
+          
+          # Cleanup
+          docker stop db-temp && docker rm db-temp
+
+      - name: Commit to repository
+        run: |
+          mkdir -p exports
+          mv *.sql exports/
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add exports/
+          git commit -m "📄 Auto-generated database schema $(date)" || exit 0
+          git push
+
+      - name: Upload as artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-schema
+          path: "exports/*.sql"
