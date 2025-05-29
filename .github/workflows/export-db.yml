@@ -2,6 +2,10 @@ name: Export Database Schema (Direct SQL)
 on:
   workflow_dispatch: 
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -24,6 +28,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GIT_HUB_TOKEN }}
         
       - name: Wait for PostgreSQL
         run: |
@@ -48,39 +54,75 @@ jobs:
           
       - name: Export database schema
         run: |
-          echo "📤 Exporting complete database schema..."
+          echo "📤 Exporting database schema with custom filtering..."
           
-          # Export schema with data
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
-            --clean \
-            --create \
-            --no-owner \
-            --no-privileges > database-complete.sql
-            
-          # Export schema only
+          OUTPUT_FILE="database-schema.sql"
+          
+          # Export complete final table structures (after all migrations)
+          # Apply the same filtering as your local script
+          echo "==> Exporting final table structures..."
           PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
             --schema-only \
-            --clean \
-            --no-owner \
-            --no-privileges > database-schema.sql
-            
-          echo "✅ Export completed!"
-          echo "📊 Complete dump size: $(du -h database-complete.sql | cut -f1)"
-          echo "📊 Schema only size: $(du -h database-schema.sql | cut -f1)"
+            --no-comments \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock | \
+            sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
+            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT_FILE"
           
-      - name: Commit and upload
+          # Export data INSERT statements
+          echo "==> Exporting data..."
+          echo -e "\n-- DATA" >> "$OUTPUT_FILE"
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
+            --data-only \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock \
+            --column-inserts | \
+            grep "^INSERT" >> "$OUTPUT_FILE"
+            
+          echo "✅ Export completed with custom filtering!"
+          echo "📊 File size: $(du -h $OUTPUT_FILE | cut -f1)"
+          echo "📋 Lines: $(wc -l < $OUTPUT_FILE)"
+          echo ""
+          echo "🔍 First 10 lines:"
+          head -10 "$OUTPUT_FILE"
+          echo ""
+          echo "🔍 Last 10 lines:"
+          tail -10 "$OUTPUT_FILE"
+          
+      - name: Prepare exports
         run: |
           mkdir -p exports
-          mv *.sql exports/
+          mv database-schema.sql exports/
           
+          echo "✅ Files prepared in exports/"
+          echo "📁 Exported files:"
+          ls -la exports/
+          
+          # Show a preview of the final output
+          echo ""
+          echo "📋 Final export preview:"
+          echo "--- First 15 lines ---"
+          head -15 exports/database-schema.sql
+          echo "--- Last 10 lines ---"
+          tail -10 exports/database-schema.sql
+          
+          # Optional: Try to commit (will succeed if permissions are correct)
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add exports/
           
           if ! git diff --staged --quiet; then
-            git commit -m "📄 Database snapshot $(date '+%Y-%m-%d %H:%M:%S')"
-            git push
-            echo "✅ Files committed to exports/"
+            if git commit -m "📄 Database snapshot $(date '+%Y-%m-%d %H:%M:%S')"; then
+              if git push; then
+                echo "✅ Files committed and pushed to repository"
+              else
+                echo "⚠️ Commit successful but push failed - files available as artifact"
+              fi
+            else
+              echo "⚠️ Commit failed - files available as artifact"
+            fi
+          else
+            echo "ℹ️ No changes to commit"
           fi
           
       - name: Upload artifacts
