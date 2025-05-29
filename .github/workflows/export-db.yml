@@ -57,7 +57,7 @@ jobs:
         run: |
           echo "📤 Exporting database schema with custom filtering..."
           
-          OUTPUT_FILE="database-schema.sql"
+          OUTPUT_FILE="database-schema-${date +%H%M%S}.sql"
           
           # Export complete final table structures (after all migrations)
           # Apply the same filtering as your local script
