@@ -1,32 +1,44 @@
 name: Export Database Schema
-
 on:
   workflow_dispatch: 
-
 jobs:
   export:
     env:
       VERSION: 4.0.0
       GITHUB_USERNAME: Mauro2888
       GITHUB_TOKEN: ${{ secrets.GIT_HUB_TOKEN }}
-      #JAVA_PROJECT_ROOT_MODULE: maven-multi-module
       MVN_SETTINGS: ./.github/workflows/settings.xml
       MVN_REPO: ~/.m2/repository
-
     runs-on: ubuntu-latest
+    
+    # Add PostgreSQL service
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: migration-db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     
     steps:
       - name: Checkout Module Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       - name: Load Common Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
         with:
           path: ./.github/workflows/common-env
           load-mode: strict
-
+          
       - name: Setup JDK ${{ env.JAVA_DISTRIBUTION }} ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
@@ -34,25 +46,42 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
           check-latest: false
-
+          
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "🔄 Waiting for PostgreSQL to be ready..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres; then
+              echo "✅ PostgreSQL is ready!"
+              break
+            fi
+            echo "⏳ Waiting for PostgreSQL... (attempt $i/30)"
+            sleep 2
+          done
+          
+      - name: Create target database
+        run: |
+          echo "🗄️ Creating target database..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d migration-db -c "CREATE DATABASE stock_trading;" || echo "Database may already exist"
+          
       - name: Run database export
         run: |
           echo "🚀 Starting database export..."
           
           echo "🔄 Applying Liquibase migrations..."
-          # Apply migrations con il path corretto
           mvn -B --settings $MVN_SETTINGS -f pom.xml \
             liquibase:update \
             -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
-            -Dliquibase.url="jdbc:postgresql://localhost:5432/migration-db" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/stock_trading" \
             -Dliquibase.username="postgres" \
             -Dliquibase.password="postgres" \
             -q
           
           echo "📤 Exporting database schema..."
-          # Export con pulizia migliore
           OUTPUT="database-schema.sql"
-          docker exec db-temp pg_dump -U postgres -d stock_trading \
+          
+          # Export schema only
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
             --schema-only \
             --no-comments \
             --no-owner \
@@ -61,18 +90,18 @@ jobs:
             --exclude-table=databasechangeloglock | \
           sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' > $OUTPUT
           
-          # Aggiungi anche i dati se servono
+          # Export data if needed
           echo -e "\n-- DATA INSERTS" >> $OUTPUT
-          docker exec db-temp pg_dump -U postgres -d stock_trading \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
             --data-only \
             --no-owner \
             --no-privileges \
             --exclude-table=databasechangelog \
             --exclude-table=databasechangeloglock \
             --column-inserts | \
-          grep "^INSERT" >> $OUTPUT
+          grep "^INSERT" >> $OUTPUT || true
           
-          # Mostra info sul file generato
+          # Show file info
           echo "✅ Export completed: $OUTPUT"
           echo "📊 File size: $(du -h $OUTPUT | cut -f1)"
           echo "📋 Lines: $(wc -l < $OUTPUT)"
@@ -80,39 +109,37 @@ jobs:
           echo "🔍 First 10 lines:"
           head -10 $OUTPUT
           
-          # Cleanup
-          docker stop db-temp && docker rm db-temp
-
       - name: Commit to repository
         run: |
-          # Crea cartella exports se non esiste
+          # Create exports folder if it doesn't exist
           mkdir -p exports
           mv *.sql exports/
           
-          # Verifica che ci sia qualcosa da committare
+          # Check if file exists
           if [ -f "exports/database-schema.sql" ]; then
-            echo "📁 File trovato, committando..."
+            echo "📁 File found, committing..."
             
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
             git add exports/
             
-            # Commit solo se ci sono cambiamenti
+            # Commit only if there are changes
             if git diff --staged --quiet; then
-              echo "ℹ️ Nessun cambiamento da committare"
+              echo "ℹ️ No changes to commit"
             else
               git commit -m "📄 Auto-generated database schema $(date '+%Y-%m-%d %H:%M:%S')"
               git push
-              echo "✅ File committato in exports/database-schema.sql"
+              echo "✅ File committed to exports/database-schema.sql"
             fi
           else
-            echo "❌ File SQL non trovato!"
-            ls -la exports/
+            echo "❌ SQL file not found!"
+            ls -la exports/ || echo "exports/ directory doesn't exist"
           fi
-
+          
       - name: Upload as artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: database-schema-$(date +%Y%m%d-%H%M%S)
+          name: database-schema-${{ github.run_number }}
           path: "exports/*.sql"
           retention-days: 30
+        if: always()
