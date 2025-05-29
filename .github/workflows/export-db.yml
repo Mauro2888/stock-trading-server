@@ -1,6 +1,7 @@
 name: Export Database Schema
 on:
   workflow_dispatch: 
+
 jobs:
   export:
     env:
@@ -11,7 +12,6 @@ jobs:
       MVN_REPO: ~/.m2/repository
     runs-on: ubuntu-latest
     
-    # Add PostgreSQL service
     services:
       postgres:
         image: postgres:15
@@ -28,12 +28,12 @@ jobs:
           - 5432:5432
     
     steps:
-      - name: Checkout Module Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           
-      - name: Load Common Environment Variables
+      - name: Load Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
         with:
           path: ./.github/workflows/common-env
@@ -47,15 +47,15 @@ jobs:
           cache: maven
           check-latest: false
           
-      - name: Wait for PostgreSQL to be ready
+      - name: Wait for PostgreSQL
         run: |
-          echo "🔄 Waiting for PostgreSQL to be ready..."
+          echo "⏳ Waiting for PostgreSQL..."
           for i in {1..30}; do
             if pg_isready -h localhost -p 5432 -U postgres; then
               echo "✅ PostgreSQL is ready!"
               break
             fi
-            echo "⏳ Waiting for PostgreSQL... (attempt $i/30)"
+            echo "Waiting... (attempt $i/30)"
             sleep 2
           done
           
@@ -64,79 +64,70 @@ jobs:
           echo "🗄️ Creating target database..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d migration-db -c "CREATE DATABASE stock_trading;" || echo "Database may already exist"
           
-      - name: Run database export
+      - name: Debug project structure
         run: |
-          echo "🚀 Starting database export..."
+          echo "📁 Current directory: $(pwd)"
+          echo "📂 Database files:"
+          find src/main/resources/db -type f 2>/dev/null || echo "No db directory found"
+          echo ""
+          echo "📋 Master changelog:"
+          cat src/main/resources/db/db-changelog-master.yml 2>/dev/null || echo "No master changelog found"
           
-          echo "🔄 Applying Liquibase migrations..."
-          mvn -B --settings $MVN_SETTINGS -f pom.xml \
-            liquibase:update \
+      - name: Test database connection
+        run: |
+          echo "🔌 Testing connection..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d stock_trading -c "SELECT version();"
+          
+      - name: Apply Liquibase migrations
+        run: |
+          echo "🔄 Running Liquibase..."
+          mvn -B --settings $MVN_SETTINGS liquibase:update \
             -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
             -Dliquibase.url="jdbc:postgresql://localhost:5432/stock_trading" \
             -Dliquibase.username="postgres" \
             -Dliquibase.password="postgres" \
-            -q
-          
-          echo "📤 Exporting database schema..."
+            -Dliquibase.verbose=true
+            
+      - name: Export database schema
+        run: |
+          echo "📤 Exporting schema..."
           OUTPUT="database-schema.sql"
           
-          # Export schema only
           PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
             --schema-only \
             --no-comments \
             --no-owner \
             --no-privileges \
             --exclude-table=databasechangelog \
-            --exclude-table=databasechangeloglock | \
-          sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' > $OUTPUT
-          
-          # Export data if needed
-          echo -e "\n-- DATA INSERTS" >> $OUTPUT
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
-            --data-only \
-            --no-owner \
-            --no-privileges \
-            --exclude-table=databasechangelog \
-            --exclude-table=databasechangeloglock \
-            --column-inserts | \
-          grep "^INSERT" >> $OUTPUT || true
-          
-          # Show file info
+            --exclude-table=databasechangeloglock > $OUTPUT
+            
           echo "✅ Export completed: $OUTPUT"
           echo "📊 File size: $(du -h $OUTPUT | cut -f1)"
           echo "📋 Lines: $(wc -l < $OUTPUT)"
-          echo ""
-          echo "🔍 First 10 lines:"
-          head -10 $OUTPUT
           
-      - name: Commit to repository
+      - name: Commit schema file
         run: |
-          # Create exports folder if it doesn't exist
           mkdir -p exports
           mv *.sql exports/
           
-          # Check if file exists
           if [ -f "exports/database-schema.sql" ]; then
-            echo "📁 File found, committing..."
-            
             git config --local user.email "action@github.com"
             git config --local user.name "GitHub Action"
             git add exports/
             
-            # Commit only if there are changes
-            if git diff --staged --quiet; then
-              echo "ℹ️ No changes to commit"
-            else
-              git commit -m "📄 Auto-generated database schema $(date '+%Y-%m-%d %H:%M:%S')"
+            if ! git diff --staged --quiet; then
+              git commit -m "📄 Updated database schema $(date '+%Y-%m-%d %H:%M:%S')"
               git push
-              echo "✅ File committed to exports/database-schema.sql"
+              echo "✅ Schema committed"
+            else
+              echo "ℹ️ No changes to commit"
             fi
           else
-            echo "❌ SQL file not found!"
-            ls -la exports/ || echo "exports/ directory doesn't exist"
+            echo "❌ Schema file not found!"
+            ls -la exports/
           fi
           
-      - name: Upload as artifact (backup)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: database-schema-${{ github.run_number }}
