@@ -1,6 +1,6 @@
 name: Export Database Schema (Direct SQL)
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,7 +31,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-        
+
       - name: Wait for PostgreSQL
         run: |
           echo "⏳ Waiting for PostgreSQL..."
@@ -42,7 +42,7 @@ jobs:
             fi
             sleep 2
           done
-          
+
       - name: Execute SQL files directly
         run: |
           echo "🔄 Executing SQL files..."
@@ -52,12 +52,14 @@ jobs:
             echo "📄 Executing: $sql_file"
             PGPASSWORD=postgres psql -h localhost -U postgres -d stock_trading -f "$sql_file"
           done
-          
+
       - name: Export database schema
         run: |
           echo "📤 Exporting database schema with custom filtering..."
           
-          OUTPUT_FILE="database-schema.sql"
+          # Create timestamped filename for audit trail
+          TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+          OUTPUT_FILE="database-schema-${TIMESTAMP}.sql"
           
           # Export complete final table structures (after all migrations)
           # Apply the same filtering as your local script
@@ -79,43 +81,49 @@ jobs:
             --exclude-table=databasechangeloglock \
             --column-inserts | \
             grep "^INSERT" >> "$OUTPUT_FILE"
-            
-          echo "✅ Export completed with custom filtering!"
-          echo "📊 File size: $(du -h $OUTPUT_FILE | cut -f1)"
-          echo "📋 Lines: $(wc -l < $OUTPUT_FILE)"
-          echo ""
-          echo "🔍 First 10 lines:"
-          head -10 "$OUTPUT_FILE"
-          echo ""
-          echo "🔍 Last 10 lines:"
-          tail -10 "$OUTPUT_FILE"
           
-      - name: Prepare exports
+          # Also create a "latest" version for easy reference
+          cp "$OUTPUT_FILE" "database-schema-latest.sql"
+          
+          echo "✅ Export completed with custom filtering!"
+          echo "📊 Timestamped file: $OUTPUT_FILE ($(du -h $OUTPUT_FILE | cut -f1))"
+          echo "📊 Latest file: database-schema-latest.sql"
+          echo "📋 Lines: $(wc -l < $OUTPUT_FILE)"
+
+      - name: Prepare exports with audit trail
         run: |
           mkdir -p exports
-          mv database-schema.sql exports/
           
-          echo "✅ Files prepared in exports/"
+          # Move both files to exports
+          mv database-schema-*.sql exports/
+          
+          echo "✅ Files prepared in exports/ with audit trail"
           echo "📁 Exported files:"
           ls -la exports/
           
-          # Show a preview of the final output
-          echo ""
-          echo "📋 Final export preview:"
-          echo "--- First 15 lines ---"
-          head -15 exports/database-schema.sql
-          echo "--- Last 10 lines ---"
-          tail -10 exports/database-schema.sql
+          # Show file count for audit trail
+          SCHEMA_COUNT=$(ls -1 exports/database-schema-*.sql | wc -l)
+          echo "📊 Total schema snapshots in audit trail: $SCHEMA_COUNT"
           
-          # Optional: Try to commit (will succeed if permissions are correct)
+          # Show preview of latest file
+          LATEST_FILE=$(ls -t exports/database-schema-2*.sql | head -1)
+          echo ""
+          echo "📋 Latest export preview ($LATEST_FILE):"
+          echo "--- First 10 lines ---"
+          head -10 "$LATEST_FILE"
+          
+          # Git configuration
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # Commit all files (builds audit trail)
           git add exports/
           
           if ! git diff --staged --quiet; then
-            if git commit -m "📄 Database snapshot $(date '+%Y-%m-%d %H:%M:%S')"; then
+            echo "📝 Adding to audit trail..."
+            if git commit -m "📄 Database schema snapshot $(date '+%Y-%m-%d %H:%M:%S')"; then
               if git push; then
-                echo "✅ Files committed and pushed to repository"
+                echo "✅ Schema snapshot added to audit trail in repository"
               else
                 echo "⚠️ Commit successful but push failed - files available as artifact"
               fi
@@ -123,9 +131,9 @@ jobs:
               echo "⚠️ Commit failed - files available as artifact"
             fi
           else
-            echo "ℹ️ No changes to commit"
+            echo "ℹ️ No new files to add to audit trail"
           fi
-          
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
