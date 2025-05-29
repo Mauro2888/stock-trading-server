@@ -1,24 +1,18 @@
-name: Export Database Schema
+name: Export Database Schema (Direct SQL)
 on:
   workflow_dispatch: 
 
 jobs:
   export:
-    env:
-      VERSION: 4.0.0
-      GITHUB_USERNAME: Mauro2888
-      GITHUB_TOKEN: ${{ secrets.GIT_HUB_TOKEN }}
-      MVN_SETTINGS: ./.github/workflows/settings.xml
-      MVN_REPO: ~/.m2/repository
     runs-on: ubuntu-latest
     
     services:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_DB: migration-db
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stock_trading
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -30,23 +24,7 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          
-      - name: Load Environment Variables
-        uses: xom9ikk/dotenv@v2.3.0
-        with:
-          path: ./.github/workflows/common-env
-          load-mode: strict
-          
-      - name: Setup JDK ${{ env.JAVA_DISTRIBUTION }} ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-          java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
-          check-latest: false
-          
+        
       - name: Wait for PostgreSQL
         run: |
           echo "⏳ Waiting for PostgreSQL..."
@@ -55,88 +33,59 @@ jobs:
               echo "✅ PostgreSQL is ready!"
               break
             fi
-            echo "Waiting... (attempt $i/30)"
             sleep 2
           done
           
-      - name: Create target database
+      - name: Execute SQL files directly
         run: |
-          echo "🗄️ Creating target database..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d migration-db -c "CREATE DATABASE stock_trading;" || echo "Database may already exist"
+          echo "🔄 Executing SQL files..."
           
-      - name: Debug project structure
-        run: |
-          echo "📁 Current directory: $(pwd)"
-          echo "📂 Database files:"
-          find src/main/resources/db -type f 2>/dev/null || echo "No db directory found"
-          echo ""
-          echo "📋 Master changelog:"
-          cat src/main/resources/db/db-changelog-master.yml 2>/dev/null || echo "No master changelog found"
-          echo ""
-          echo "📁 Changelog directory contents:"
-          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
-          echo ""
-          echo "🔍 SQL file exists?"
-          ls -la src/main/resources/db/changelog/001-stock_trading.sql 2>/dev/null || echo "SQL file not found"
+          # Find and execute all SQL files in order
+          find src/main/resources/db -name "*.sql" -type f | sort | while read sql_file; do
+            echo "📄 Executing: $sql_file"
+            PGPASSWORD=postgres psql -h localhost -U postgres -d stock_trading -f "$sql_file"
+          done
           
-      - name: Test database connection
-        run: |
-          echo "🔌 Testing connection..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d stock_trading -c "SELECT version();"
-          
-      - name: Apply Liquibase migrations
-        run: |
-          echo "🔄 Running Liquibase..."
-          mvn -B --settings $MVN_SETTINGS liquibase:update \
-            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
-            -Dliquibase.url="jdbc:postgresql://localhost:5432/stock_trading" \
-            -Dliquibase.username="postgres" \
-            -Dliquibase.password="postgres" \
-            -Dliquibase.verbose=true
-            
       - name: Export database schema
         run: |
-          echo "📤 Exporting schema..."
-          OUTPUT="database-schema.sql"
+          echo "📤 Exporting complete database schema..."
           
+          # Export schema with data
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
+            --clean \
+            --create \
+            --no-owner \
+            --no-privileges > database-complete.sql
+            
+          # Export schema only
           PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
             --schema-only \
-            --no-comments \
+            --clean \
             --no-owner \
-            --no-privileges \
-            --exclude-table=databasechangelog \
-            --exclude-table=databasechangeloglock > $OUTPUT
+            --no-privileges > database-schema.sql
             
-          echo "✅ Export completed: $OUTPUT"
-          echo "📊 File size: $(du -h $OUTPUT | cut -f1)"
-          echo "📋 Lines: $(wc -l < $OUTPUT)"
+          echo "✅ Export completed!"
+          echo "📊 Complete dump size: $(du -h database-complete.sql | cut -f1)"
+          echo "📊 Schema only size: $(du -h database-schema.sql | cut -f1)"
           
-      - name: Commit schema file
+      - name: Commit and upload
         run: |
           mkdir -p exports
           mv *.sql exports/
           
-          if [ -f "exports/database-schema.sql" ]; then
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git add exports/
-            
-            if ! git diff --staged --quiet; then
-              git commit -m "📄 Updated database schema $(date '+%Y-%m-%d %H:%M:%S')"
-              git push
-              echo "✅ Schema committed"
-            else
-              echo "ℹ️ No changes to commit"
-            fi
-          else
-            echo "❌ Schema file not found!"
-            ls -la exports/
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add exports/
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "📄 Database snapshot $(date '+%Y-%m-%d %H:%M:%S')"
+            git push
+            echo "✅ Files committed to exports/"
           fi
           
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: database-schema-${{ github.run_number }}
+          name: database-snapshot-${{ github.run_number }}
           path: "exports/*.sql"
           retention-days: 30
-        if: always()
