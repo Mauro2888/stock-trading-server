@@ -64,6 +64,7 @@ jobs:
           echo "🗄️ Creating target database..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d migration-db -c "CREATE DATABASE stock_trading;" || echo "Database may already exist"
           
+      - name: Create Liquibase changelog for SQL file
       - name: Debug project structure
         run: |
           echo "📁 Current directory: $(pwd)"
@@ -72,6 +73,25 @@ jobs:
           echo ""
           echo "📋 Master changelog:"
           cat src/main/resources/db/db-changelog-master.yml 2>/dev/null || echo "No master changelog found"
+          echo ""
+          echo "📁 Changelog directory contents:"
+          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
+          echo ""
+          echo "🔍 Looking for changelog files:"
+          find src/main/resources/db/changelog -name "*.yml" -o -name "*.yaml" -o -name "*.xml" -o -name "*.json" 2>/dev/null || echo "No changelog files found"
+        run: |
+          echo "📁 Current directory: $(pwd)"
+          echo "📂 Database files:"
+          find src/main/resources/db -type f 2>/dev/null || echo "No db directory found"
+          echo ""
+          echo "📋 Master changelog:"
+          cat src/main/resources/db/db-changelog-master.yml 2>/dev/null || echo "No master changelog found"
+          echo ""
+          echo "📁 Changelog directory contents:"
+          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
+          echo ""
+          echo "🔍 Looking for changelog files:"
+          find src/main/resources/db/changelog -name "*.yml" -o -name "*.yaml" -o -name "*.xml" -o -name "*.json" 2>/dev/null || echo "No changelog files found"
           
       - name: Test database connection
         run: |
