@@ -39,14 +39,17 @@ jobs:
           load-mode: strict
 
 
-      - name: Run Liquibase Migrations
-        uses: liquibase/liquibase-github-action@v7
-        with:
-          operation: 'update'
-          changelogFile: 'src/main/resources/db/db-changelog-master.yml'
-          url: 'jdbc:postgresql://localhost:5432/export_db'
-          username: 'postgres'
-          password: 'postgres'
+      - name: Setup Database
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: export_db
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          for sql_file in $(find src/main/resources/db -name "*.sql" -type f | sort); do
+            psql -f "$sql_file"
+          done
 
       - name: Export database schema
         run: |
