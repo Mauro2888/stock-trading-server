@@ -90,29 +90,6 @@ jobs:
           echo "==> Timestamped file: $OUTPUT_FILE ($(du -h $OUTPUT_FILE | cut -f1))"
           echo "==> Latest file: database-schema-latest.sql"
 
-        # Might be necessary to fix (POC)
-      - name: Prepare exports
-        run: |
-          mkdir -p ${{env.EXPORT_PATH}}
-          
-          mv database-schema-*.sql ${{env.EXPORT_PATH}}/
-          
-          echo "Files prepared in exports"
-          echo "Exported files:"
-          ls -la ${{env.EXPORT_PATH}}/
-          
-          # TO BE FIX          
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          git add ${{env.EXPORT_PATH}}/
-          
-          if git diff --staged --quiet; then
-            echo "No files to commit"
-          else
-            git commit -m "Schema snapshot $(date '+%Y-%m-%d %H:%M:%S')" && git push
-          fi
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
