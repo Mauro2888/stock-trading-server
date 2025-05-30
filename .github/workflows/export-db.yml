@@ -38,12 +38,12 @@ jobs:
           path: ./.github/workflows/common-env
           load-mode: strict
 
-      # Sostituiamo tutto il wait + execute con Liquibase
+
       - name: Run Liquibase Migrations
-        uses: liquibase-github-actions/update@v4.29.1
+        uses: liquibase/liquibase-github-action@v7
         with:
-          changelogFile: src/main/resources/db/db-changelog-master.xml
-          url: jdbc:postgresql://localhost:${{ job.services.postgres.ports[5432] }}/export_db
+          changelogFile: src/main/resources/db/db-changelog-master.yml
+          url: jdbc:postgresql://localhost:5432/export_db
           username: postgres
           password: postgres
           driver: org.postgresql.Driver
