@@ -57,7 +57,6 @@ jobs:
         run: |
           echo "==> Exporting database schema..."
           
-          # Create timestamped filename
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
           OUTPUT_FILE="database-schema-${TIMESTAMP}.sql"
           
@@ -73,8 +72,7 @@ jobs:
             sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
             awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT_FILE"
           
-          # Export data INSERT statements
-          echo "==> Exporting data..."
+          echo "==> Exporting INSERT data..."
           echo -e "\n-- DATA" >> "$OUTPUT_FILE"
           PGPASSWORD=${{env.POSTGRES_PASSWORD}} pg_dump \
             -h ${{env.POSTGRES_HOST}} \
@@ -93,38 +91,26 @@ jobs:
           echo "==> Latest file: database-schema-latest.sql"
 
         # Might be necessary to fix (POC)
-      - name: Prepare exports with audit
+      - name: Prepare exports
         run: |
           mkdir -p ${{env.EXPORT_PATH}}
           
-          # Move both files to exports
           mv database-schema-*.sql ${{env.EXPORT_PATH}}/
           
           echo "Files prepared in exports"
           echo "Exported files:"
           ls -la ${{env.EXPORT_PATH}}/
           
-          
-          # Git configuration
+          # TO BE FIX          
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # Commit all files (builds audit trail)
           git add ${{env.EXPORT_PATH}}/
           
-          if ! git diff --staged --quiet; then
-            echo "Adding to audit trail..."
-            if git commit -m "Database schema snapshot $(date '+%Y-%m-%d %H:%M:%S')"; then
-              if git push; then
-                echo "==> Schema snapshot added to audit trail in repository"
-              else
-                echo "==> Commit successful but push failed - files available as artifact"
-              fi
-            else
-              echo "==> Commit failed - files available as artifact"
-            fi
+          if git diff --staged --quiet; then
+            echo "No files to commit"
           else
-            echo "==> No new files to add to audit trail"
+            git commit -m "Schema snapshot $(date '+%Y-%m-%d %H:%M:%S')" && git push
           fi
 
       - name: Upload artifacts
