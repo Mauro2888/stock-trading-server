@@ -16,7 +16,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: ${{ env.EXPORT_DB_NAME }}
+          POSTGRES_DB: export_db
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -37,26 +37,14 @@ jobs:
           path: ./.github/workflows/common-env
           load-mode: strict
           
-      - name: Wait for PostgreSQL
-        run: |
-          echo "⏳ Waiting for PostgreSQL..."
-          for i in {1..30}; do
-            if pg_isready -h localhost -p 5432 -U postgres; then
-              echo "✅ PostgreSQL is ready!"
-              break
-            fi
-            sleep 2
-          done
-
-      - name: Execute SQL files directly
-        run: |
-          echo "🔄 Executing SQL files..."
-          
-          # Find and execute all SQL files in order
-          find src/main/resources/db -name "*.sql" -type f | sort | while read sql_file; do
-            echo "📄 Executing: $sql_file"
-            PGPASSWORD=postgres psql -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} -f "$sql_file"
-          done
+      - name: Run Liquibase Migrations
+        uses: liquibase-github-actions/update@v4.29.1
+        with:
+          changelogFile: src/main/resources/db/changelog/db.changelog-master.xml
+          url: jdbc:postgresql://localhost:${{ job.services.postgres.ports[5432] }}/export_db
+          username: postgres
+          password: postgres
+          driver: org.postgresql.Driver
 
       - name: Export database schema
         run: |
@@ -69,7 +57,7 @@ jobs:
           # Export complete final table structures (after all migrations)
           # Apply the same filtering as your local script
           echo "==> Exporting final table structures..."
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --schema-only \
             --no-comments \
             --exclude-table=databasechangelog \
@@ -80,7 +68,7 @@ jobs:
           # Export data INSERT statements
           echo "==> Exporting data..."
           echo -e "\n-- DATA" >> "$OUTPUT_FILE"
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --data-only \
             --exclude-table=databasechangelog \
             --exclude-table=databasechangeloglock \
