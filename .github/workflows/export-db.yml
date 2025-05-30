@@ -121,9 +121,24 @@ jobs:
             echo "==> No new files to add to audit trail"
           fi
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create PR with schema
+        run: |
+          # Muovi i file nella cartella exports
+          mkdir -p exports
+          mv database-schema*.sql exports/
+      
+
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+      
+          git checkout -b schema-update-${{ github.run_number }}
+          git add exports/
+          git commit -m "Update database schema"
+          git push origin schema-update-${{ github.run_number }}
+      - name: Open Pull Request
+        uses: peter-evans/create-pull-request@v5
         with:
-          name: database-snapshot-${{ github.run_number }}
-          path: "exports/*.sql"
-          retention-days: 30
+          branch: 'schema-update-${{ github.run_number }}'
+          title: Database Schema Update
+          body: Auto-generated schema export
+
