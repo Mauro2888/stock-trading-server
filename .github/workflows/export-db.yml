@@ -42,11 +42,11 @@ jobs:
       - name: Run Liquibase Migrations
         uses: liquibase/liquibase-github-action@v7
         with:
-          changelogFile: src/main/resources/db/db-changelog-master.yml
-          url: jdbc:postgresql://localhost:5432/export_db
-          username: postgres
-          password: postgres
-          driver: org.postgresql.Driver
+          operation: 'update'
+          changelogFile: 'src/main/resources/db/db-changelog-master.yml'
+          url: 'jdbc:postgresql://localhost:5432/export_db'
+          username: 'postgres'
+          password: 'postgres'
 
       - name: Export database schema
         run: |
