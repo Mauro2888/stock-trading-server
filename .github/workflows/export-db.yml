@@ -42,7 +42,7 @@ jobs:
       - name: Run Liquibase Migrations
         uses: liquibase-github-actions/update@v4.29.1
         with:
-          changelogFile: src/main/resources/db/changelog/db.changelog-master.xml
+          changelogFile: src/main/resources/db/db-changelog-master.xml
           url: jdbc:postgresql://localhost:${{ job.services.postgres.ports[5432] }}/export_db
           username: postgres
           password: postgres
