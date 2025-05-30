@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   export:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     services:
       postgres:
@@ -31,7 +31,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-
+      - name: Load Common Environment Variables
+        uses: xom9ikk/dotenv@v2.3.0
+        with:
+          path: ./.github/workflows/common-env
+          load-mode: strict
+          
       - name: Wait for PostgreSQL
         run: |
           echo "⏳ Waiting for PostgreSQL..."
