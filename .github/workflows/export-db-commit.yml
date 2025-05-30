@@ -1,0 +1,130 @@
+name: Export Database Schema With commit and push (Liquibase)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: export_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Load Common Environment Variables
+        uses: xom9ikk/dotenv@v2.3.0
+        with:
+          path: ./.github/workflows/common-env
+          load-mode: strict
+
+
+      - name: Setup Export DB
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: export_db
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
+          # The mvn liquibase command does not work properly (fail to locate from path)
+          # I choose to use a simple loop to take all SQL files from the folder where the SQL migration files might be located.
+        run: |
+          for sql_file in $(find src/main/resources/db -name "*.sql" -type f | sort); do
+            psql -f "$sql_file"
+          done
+
+      - name: Export database schema
+        run: |
+          echo "==> Exporting database schema..."
+          
+          # Create timestamped filename
+          TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+          OUTPUT_FILE="database-schema-${TIMESTAMP}.sql"
+          
+          echo "==> Exporting final table structures..."
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
+            --schema-only \
+            --no-comments \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock | \
+            sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
+            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT_FILE"
+          
+          # Export data INSERT statements
+          echo "==> Exporting data..."
+          echo -e "\n-- DATA" >> "$OUTPUT_FILE"
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
+            --data-only \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock \
+            --column-inserts | \
+            grep "^INSERT" >> "$OUTPUT_FILE"
+          
+          # --> Also create a "latest" version NOT NECESSARY PROBABLY
+          cp "$OUTPUT_FILE" "database-schema-latest.sql"
+          
+          echo "==> Timestamped file: $OUTPUT_FILE ($(du -h $OUTPUT_FILE | cut -f1))"
+          echo "==> Latest file: database-schema-latest.sql"
+
+        # Might be necessary to fix (POC)
+      - name: Prepare exports with audit
+        run: |
+          mkdir -p exports
+          
+          # Move both files to exports
+          mv database-schema-*.sql exports/
+          
+          echo "Files prepared in exports"
+          echo "Exported files:"
+          ls -la exports/
+          
+          
+          # Git configuration
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Commit all files (builds audit trail)
+          git add exports/
+          
+          if ! git diff --staged --quiet; then
+            echo "Adding to audit trail..."
+            if git commit -m "Database schema snapshot $(date '+%Y-%m-%d %H:%M:%S')"; then
+              if git push; then
+                echo "==> Schema snapshot added to audit trail in repository"
+              else
+                echo "==> Commit successful but push failed - files available as artifact"
+              fi
+            else
+              echo "==> Commit failed - files available as artifact"
+            fi
+          else
+            echo "==> No new files to add to audit trail"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 'database-schema-${{ github.run_number }}'
+          path: database-schema*.sql
+          retention-days: 30
+
