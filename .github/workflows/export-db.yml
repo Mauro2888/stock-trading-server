@@ -1,4 +1,4 @@
-name: Export Database Schema (Direct SQL)
+name: Export Database Schema (Liquibase)
 on:
   workflow_dispatch:
 
@@ -31,12 +31,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          
       - name: Load Common Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
         with:
           path: ./.github/workflows/common-env
           load-mode: strict
-          
+
+      # Sostituiamo tutto il wait + execute con Liquibase
       - name: Run Liquibase Migrations
         uses: liquibase-github-actions/update@v4.29.1
         with:
