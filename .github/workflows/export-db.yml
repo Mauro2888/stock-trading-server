@@ -55,7 +55,7 @@ jobs:
 
       - name: Export database schema
         run: |
-          echo "==> Exporting database schema with custom filtering..."
+          echo "==> Exporting database schema..."
           
           # Create timestamped filename
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
@@ -83,10 +83,8 @@ jobs:
           # --> Also create a "latest" version NOT NECESSARY PROBABLY
           cp "$OUTPUT_FILE" "database-schema-latest.sql"
           
-          echo "==> Export completed with custom filtering!"
           echo "==> Timestamped file: $OUTPUT_FILE ($(du -h $OUTPUT_FILE | cut -f1))"
           echo "==> Latest file: database-schema-latest.sql"
-          echo "==> Lines: $(wc -l < $OUTPUT_FILE)"
 
         # Might be necessary to fix (POC) 
       - name: Prepare exports with audit 
