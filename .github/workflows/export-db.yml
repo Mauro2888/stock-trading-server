@@ -12,11 +12,11 @@ jobs:
     
     services:
       postgres:
-        image: postgres:15
+        image: ${{ env.POSTGRES_IMAGE }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: stock_trading
+          POSTGRES_DB: ${{ env.EXPORT_DB_NAME }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -50,7 +50,7 @@ jobs:
           # Find and execute all SQL files in order
           find src/main/resources/db -name "*.sql" -type f | sort | while read sql_file; do
             echo "📄 Executing: $sql_file"
-            PGPASSWORD=postgres psql -h localhost -U postgres -d stock_trading -f "$sql_file"
+            PGPASSWORD=postgres psql -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} -f "$sql_file"
           done
 
       - name: Export database schema
@@ -64,7 +64,7 @@ jobs:
           # Export complete final table structures (after all migrations)
           # Apply the same filtering as your local script
           echo "==> Exporting final table structures..."
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} \
             --schema-only \
             --no-comments \
             --exclude-table=databasechangelog \
@@ -75,7 +75,7 @@ jobs:
           # Export data INSERT statements
           echo "==> Exporting data..."
           echo -e "\n-- DATA" >> "$OUTPUT_FILE"
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d stock_trading \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d ${{ env.EXPORT_DB_NAME }} \
             --data-only \
             --exclude-table=databasechangelog \
             --exclude-table=databasechangeloglock \
