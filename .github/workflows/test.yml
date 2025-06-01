@@ -1,0 +1,97 @@
+name: Export Liquibase
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: export_db
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Load Environment
+        uses: xom9ikk/dotenv@v2.3.0
+        with:
+          path: ./common-env/.env
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Debug file structure
+        run: |
+          echo "📁 Current directory: $(pwd)"
+          echo "📂 Checking file structure..."
+          find . -name "*.yml" -o -name "*.yaml" | head -10
+          echo ""
+          echo "📋 Looking for master changelog..."
+          ls -la src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
+          echo ""
+          echo "📁 Database directory contents:"
+          find src/main/resources/db -type f | head -10
+
+      - name: Apply Liquibase migrations
+        run: |
+          echo "🔄 Applying Liquibase migrations..."
+          echo "📋 Using changelog: ${{ env.LIQUIBASE_CHANGELOG_FILE }}"
+          
+          mvn liquibase:update \
+            -Dliquibase.changeLogFile="${{ env.LIQUIBASE_CHANGELOG_FILE }}" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/${{ env.POSTGRES_DB }}" \
+            -Dliquibase.username="postgres" \
+            -Dliquibase.password="postgres" \
+            -Dliquibase.verbose=true
+
+      - name: Export schema
+        run: |
+          TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+          OUTPUT="database-schema-${TIMESTAMP}.sql"
+          
+          # Export schema
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
+            --schema-only --no-comments \
+            --exclude-table=databasechangelog --exclude-table=databasechangeloglock | \
+            sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
+            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT"
+          
+          # Export data
+          echo -e "\n-- DATA" >> "$OUTPUT"
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
+            --data-only --exclude-table=databasechangelog --exclude-table=databasechangeloglock \
+            --column-inserts | grep "^INSERT" >> "$OUTPUT"
+          
+          # Move to exports
+          mkdir -p exports
+          mv "$OUTPUT" exports/
+
+      - name: Commit and upload
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add exports/
+          git commit -m "Database export $(date)" || true
+          git push || true
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: database-schema-${{ github.run_number }}
+          path: exports/*.sql
