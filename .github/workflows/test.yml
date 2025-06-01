@@ -1,51 +1,34 @@
-name: Export Database Schema
-
+name: Export Database Schema (Generic)
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
 
-env:
-  POSTGRES_HOST: localhost
-  POSTGRES_DB: export_db
-  POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: postgres
-
-  SQL_SOURCE_PATH: src/main/resources/db
-  SQL_PATH: src/main/resources/db
-  EXPORT_PATH: exports
-  EXPORT_RETENTION_DAYS: 7
-  LIQUIBASE_CHANGELOG_FILE: src/main/resources/db/db-changelog-master.yml
-  MVN_SETTINGS: ./.github/workflows/settings.xml
-
 jobs:
   export:
     runs-on: ubuntu-22.04
-
+    
     services:
       postgres:
         image: postgres:14
         env:
-          POSTGRES_USER: ${{ env.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ env.POSTGRES_DB }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres  # Always start with default postgres db
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
         ports:
           - 5432:5432
-
+    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Load Common Environment Variables
+          
+      - name: Load Environment
         uses: xom9ikk/dotenv@v2.3.0
         with:
-          path: ./.github/workflows/common-env
-          load-mode: strict
+          path: ./common-env/.env
 
       - name: Setup JDK (for Liquibase)
         uses: actions/setup-java@v4
@@ -57,77 +40,72 @@ jobs:
         run: |
           echo "📁 Current directory: $(pwd)"
           echo "📂 Database directory contents:"
-          find $SQL_SOURCE_PATH -type f | head -10
+          find src/main/resources/db -type f | head -10
           echo ""
-
           echo "📋 Master changelog content BEFORE fix:"
-          cat "$LIQUIBASE_CHANGELOG_FILE" || echo "❌ Master changelog not found"
+          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
           echo ""
-
-          # Fix absolute path in changelog if needed
-          if grep -q 'path: "/db/changelog"' "$LIQUIBASE_CHANGELOG_FILE" 2>/dev/null; then
+          
+          # Fix the path in changelog if it has absolute path
+          if grep -q 'path: "/db/changelog"' src/main/resources/db/db-changelog-master.yml 2>/dev/null; then
             echo "🔧 Fixing absolute path to relative path..."
-            sed -i 's|path: "/db/changelog"|path: "db/changelog"|g' "$LIQUIBASE_CHANGELOG_FILE"
+            sed -i 's|path: "/db/changelog"|path: "db/changelog"|g' src/main/resources/db/db-changelog-master.yml
             echo "✅ Fixed path from '/db/changelog' to 'db/changelog'"
           else
             echo "ℹ️ Path looks correct or file not found"
           fi
-
+          
           echo ""
           echo "📋 Master changelog content AFTER fix:"
-          cat "$LIQUIBASE_CHANGELOG_FILE" || echo "❌ Master changelog not found"
+          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
           echo ""
           echo "📁 Changelog directory contents:"
-          ls -la "$SQL_SOURCE_PATH/changelog" 2>/dev/null || echo "No changelog directory found"
+          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
 
       - name: Apply Liquibase migrations
         run: |
           echo "🔄 Applying Liquibase migrations..."
-          echo "📋 Using changelog: $LIQUIBASE_CHANGELOG_FILE"
-
+          echo "📋 Using changelog: src/main/resources/db/db-changelog-master.yml"
+          echo "📊 Database: export_db"
+          
           mvn liquibase:update \
-            -Dliquibase.changeLogFile="$LIQUIBASE_CHANGELOG_FILE" \
-            -Dliquibase.url="jdbc:postgresql://$POSTGRES_HOST:5432/$POSTGRES_DB" \
-            -Dliquibase.username="$POSTGRES_USER" \
-            -Dliquibase.password="$POSTGRES_PASSWORD" \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
+            -Dliquibase.username="postgres" \
+            -Dliquibase.password="postgres" \
             -Dliquibase.verbose=true
 
       - name: Export schema
         run: |
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
           OUTPUT="database-schema-${TIMESTAMP}.sql"
-
-          mkdir -p $EXPORT_PATH
-
+          
           # Export schema
-          PGPASSWORD=$POSTGRES_PASSWORD pg_dump -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --schema-only --no-comments \
             --exclude-table=databasechangelog --exclude-table=databasechangeloglock | \
             sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
             awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT"
-
+          
           # Export data
           echo -e "\n-- DATA" >> "$OUTPUT"
-          PGPASSWORD=$POSTGRES_PASSWORD pg_dump -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB \
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --data-only --exclude-table=databasechangelog --exclude-table=databasechangeloglock \
             --column-inserts | grep "^INSERT" >> "$OUTPUT"
-
-          mv "$OUTPUT" "$EXPORT_PATH/"
-
-      - name: Prune old exports
-        run: |
-          echo "🧹 Cleaning exports older than $EXPORT_RETENTION_DAYS days"
-          find $EXPORT_PATH -type f -mtime +$EXPORT_RETENTION_DAYS -print -delete
+          
+          # Move to exports
+          mkdir -p exports
+          mv "$OUTPUT" exports/
 
       - name: Commit and upload
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add $EXPORT_PATH/
+          git add exports/
           git commit -m "Database export $(date)" || true
           git push || true
-
+          
       - uses: actions/upload-artifact@v4
         with:
           name: database-schema-${{ github.run_number }}
-          path: ${{ env.EXPORT_PATH }}/*.sql
+          path: exports/*.sql
