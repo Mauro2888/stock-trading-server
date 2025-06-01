@@ -18,7 +18,6 @@ env:
   EXPORT_RETENTION_DAYS: 7
 
   MVN_SETTINGS: ./.github/workflows/settings.xml
-  LIQUIBASE_CHANGELOG_FILE: src/main/resources/db/db-changelog-master.yml
 
 jobs:
   export:
