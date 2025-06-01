@@ -21,47 +21,52 @@ jobs:
           - 5432:5432
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
           
-      - name: Load Common Environment Variables
+      - name: Load Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
         with:
           path: ./.github/workflows/common-env
           load-mode: strict
-
+          
       - name: Setup JDK (for Liquibase)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Debug and fix changelog
+      - name: Setup target database
         run: |
-          echo "📁 Current directory: $(pwd)"
-          echo "📂 Database directory contents:"
-          find src/main/resources/db -type f | head -10
-          echo ""
-          echo "📋 Master changelog content BEFORE fix:"
-          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
-          echo ""
+          echo "🔧 Debug PostgreSQL connection..."
+          echo "User: $(whoami)"
+          echo "PostgreSQL process:"
+          ps aux | grep postgres || echo "No postgres process found"
           
-          # Fix the path in changelog if it has absolute path
-          if grep -q 'path: "/db/changelog"' src/main/resources/db/db-changelog-master.yml 2>/dev/null; then
-            echo "🔧 Fixing absolute path to relative path..."
-            sed -i 's|path: "/db/changelog"|path: "db/changelog"|g' src/main/resources/db/db-changelog-master.yml
-            echo "✅ Fixed path from '/db/changelog' to 'db/changelog'"
-          else
-            echo "ℹ️ Path looks correct or file not found"
-          fi
+          echo "⏳ Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres; then
+              echo "✅ PostgreSQL is ready!"
+              break
+            fi
+            echo "Waiting... (attempt $i/30)"
+            sleep 2
+          done
           
-          echo ""
-          echo "📋 Master changelog content AFTER fix:"
-          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
-          echo ""
-          echo "📁 Changelog directory contents:"
-          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
+          echo "📋 Testing basic connection..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "SELECT current_user, current_database();"
+          
+          echo "🗄️ Creating export database..."
+          PGPASSWORD=postgres createdb -h localhost -U postgres export_db
+          
+          echo "🔌 Testing new database connection..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d export_db -c "SELECT version();"
+          
+          echo "📊 Listing databases..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "\l"
 
       - name: Apply Liquibase migrations
         run: |
@@ -80,22 +85,22 @@ jobs:
         run: |
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
           OUTPUT="database-schema-${TIMESTAMP}.sql"
-          
+
+          mkdir -p exports
+
           # Export schema
           PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --schema-only --no-comments \
             --exclude-table=databasechangelog --exclude-table=databasechangeloglock | \
             sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
             awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT"
-          
+
           # Export data
           echo -e "\n-- DATA" >> "$OUTPUT"
           PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
             --data-only --exclude-table=databasechangelog --exclude-table=databasechangeloglock \
             --column-inserts | grep "^INSERT" >> "$OUTPUT"
-          
-          # Move to exports
-          mkdir -p exports
+
           mv "$OUTPUT" exports/
 
       - name: Commit and upload
@@ -105,7 +110,7 @@ jobs:
           git add exports/
           git commit -m "Database export $(date)" || true
           git push || true
-          
+
       - uses: actions/upload-artifact@v4
         with:
           name: database-schema-${{ github.run_number }}
