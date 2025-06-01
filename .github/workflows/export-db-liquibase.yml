@@ -70,15 +70,14 @@ jobs:
           
           docker run --rm \
             --network host \
-            -v ${{ github.workspace }}/src/main/resources:${{ env.CHANGELOG_MOUNT_PATH }} \
+            -v ${{ github.workspace }}/src/main/resources:/liquibase/changelog \
             ${{ env.LIQUIBASE_DOCKER_IMAGE }} \
             --changeLogFile=${{ env.LIQUIBASE_CHANGELOG_FILE }} \
             --username=${{ env.POSTGRES_USER }} \
             --password=${{ env.POSTGRES_PASSWORD }} \
             --url=jdbc:postgresql://${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }} \
             --driver=org.postgresql.Driver \
-            --classpath=${{ env.CHANGELOG_MOUNT_PATH }} \
-            --log-level=${{ env.LIQUIBASE_LOG_LEVEL }} \
+            --classpath=/liquibase/changelog \
             update
           
           echo "✅ Liquibase migrations completed!"
