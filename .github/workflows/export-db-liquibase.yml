@@ -2,10 +2,6 @@ name: Export Database Schema (Artifacts)
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-  actions: read
-
 jobs:
   export:
     runs-on: ubuntu-22.04
