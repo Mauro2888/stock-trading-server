@@ -94,37 +94,57 @@ jobs:
           echo "📊 Listing databases..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "\l"
 
-      - name: Apply migrations via Spring Boot (like local)
+      - name: Try different Liquibase approach
         run: |
-          echo "🔄 Applying migrations via Spring Boot (same as local)..."
-          echo "📊 Database URL: jdbc:postgresql://localhost:5432/export_db"
+          echo "🔄 Testing different Liquibase approaches..."
           
-          # Create temporary application.properties for CI
-          cat > src/main/resources/application-ci.properties << EOF
-spring.application.name=stock-trading-server
-spring.datasource.url=jdbc:postgresql://localhost:5432/export_db
-spring.datasource.username=postgres
-spring.datasource.password=postgres
-spring.datasource.driver-class-name=org.postgresql.Driver
-
-spring.jpa.hibernate.ddl-auto=none
-spring.liquibase.change-log=classpath:db/db-changelog-master.yml
-
-# Disable other features for CI
-spring.grpc.server.port=0
+          # Approach 1: Try with explicit driver
+          echo "📋 Approach 1: Maven plugin with explicit driver"
+          if mvn liquibase:update \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
+            -Dliquibase.username="postgres" \
+            -Dliquibase.password="postgres" \
+            -Dliquibase.driver="org.postgresql.Driver" \
+            -Dliquibase.verbose=true; then
+            echo "✅ Approach 1 succeeded!"
+          else
+            echo "❌ Approach 1 failed, trying fallback..."
+            
+            # Fallback: Create YAML wrappers for SQL files
+            echo "🔧 Creating Liquibase YAML wrappers..."
+            for sql_file in src/main/resources/db/changelog/*.sql; do
+              if [ -f "$sql_file" ]; then
+                base_name=$(basename "$sql_file" .sql)
+                yaml_file="src/main/resources/db/changelog/${base_name}.yml"
+                
+                echo "📝 Creating: $yaml_file"
+                cat > "$yaml_file" << EOF
+databaseChangeLog:
+  - changeSet:
+      id: ${base_name}
+      author: github-action
+      changes:
+        - sqlFile:
+            path: ${base_name}.sql
+            relativeToChangelogFile: true
 EOF
+              fi
+            done
+            
+            echo "📋 Retrying with YAML wrappers..."
+            mvn liquibase:update \
+              -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+              -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
+              -Dliquibase.username="postgres" \
+              -Dliquibase.password="postgres" \
+              -Dliquibase.driver="org.postgresql.Driver" \
+              -Dliquibase.verbose=true
+          fi
           
-          echo "🚀 Running Spring Boot with Liquibase (exactly like your local)..."
-          mvn spring-boot:run -Dspring-boot.run.profiles=ci -Dspring-boot.run.arguments="--spring.main.exit-on-completion=true" &
-          SPRING_PID=$!
-          
-          # Wait a bit for Spring to start and run migrations
-          sleep 15
-          
-          # Kill Spring Boot process
-          kill $SPRING_PID || true
-          
-          echo "✅ Spring Boot Liquibase migration completed"
+          echo ""
+          echo "📋 Checking if tables were created..."
+          PGPASSWORD=postgres psql -h localhost -U postgres -d export_db -c "\dt" || echo "No tables found"
 
       - name: Export schema
         run: |
