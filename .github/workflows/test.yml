@@ -39,6 +39,32 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Debug Liquibase configuration
+        run: |
+          echo "🔍 Debugging Liquibase setup differences..."
+          echo "📁 Current directory: $(pwd)"
+          echo ""
+          echo "📂 Exact file structure:"
+          find src/main/resources/db -type f -exec ls -la {} \;
+          echo ""
+          echo "📋 Master changelog content:"
+          cat src/main/resources/db/db-changelog-master.yml
+          echo ""
+          echo "📁 Changelog directory exact contents:"
+          ls -la src/main/resources/db/changelog/
+          echo ""
+          echo "🔧 Maven Liquibase plugin version:"
+          mvn help:describe -Dplugin=org.liquibase:liquibase-maven-plugin -Ddetail=true | grep -A5 -B5 "Version"
+          echo ""
+          echo "📦 Spring Boot Liquibase dependency:"
+          mvn dependency:tree | grep -i liquibase
+          echo ""
+          echo "☕ Java versions:"
+          echo "Maven Java: $(mvn -version | grep 'Java version')"
+          echo "Runtime Java: $(java -version 2>&1 | head -1)"
+          echo ""
+          echo "🔧 Maven effective settings:"
+          mvn help:effective-settings | grep -A10 -B10 liquibase || echo "No liquibase settings found"
       - name: Setup target database
         run: |
           echo "🔧 Debug PostgreSQL connection..."
@@ -68,18 +94,37 @@ jobs:
           echo "📊 Listing databases..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "\l"
 
-      - name: Apply Liquibase migrations
+      - name: Apply migrations via Spring Boot (like local)
         run: |
-          echo "🔄 Applying Liquibase migrations..."
-          echo "📋 Using changelog: src/main/resources/db/db-changelog-master.yml"
-          echo "📊 Database: export_db"
+          echo "🔄 Applying migrations via Spring Boot (same as local)..."
+          echo "📊 Database URL: jdbc:postgresql://localhost:5432/export_db"
           
-          mvn liquibase:update \
-            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
-            -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
-            -Dliquibase.username="postgres" \
-            -Dliquibase.password="postgres" \
-            -Dliquibase.verbose=true
+          # Create temporary application.properties for CI
+          cat > src/main/resources/application-ci.properties << EOF
+spring.application.name=stock-trading-server
+spring.datasource.url=jdbc:postgresql://localhost:5432/export_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.datasource.driver-class-name=org.postgresql.Driver
+
+spring.jpa.hibernate.ddl-auto=none
+spring.liquibase.change-log=classpath:db/db-changelog-master.yml
+
+# Disable other features for CI
+spring.grpc.server.port=0
+EOF
+          
+          echo "🚀 Running Spring Boot with Liquibase (exactly like your local)..."
+          mvn spring-boot:run -Dspring-boot.run.profiles=ci -Dspring-boot.run.arguments="--spring.main.exit-on-completion=true" &
+          SPRING_PID=$!
+          
+          # Wait a bit for Spring to start and run migrations
+          sleep 15
+          
+          # Kill Spring Boot process
+          kill $SPRING_PID || true
+          
+          echo "✅ Spring Boot Liquibase migration completed"
 
       - name: Export schema
         run: |
