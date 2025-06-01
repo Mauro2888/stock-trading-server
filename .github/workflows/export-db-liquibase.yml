@@ -1,4 +1,3 @@
-
 name: Export Database Schema (Artifacts)
 on:
   workflow_dispatch:
@@ -85,12 +84,12 @@ jobs:
           
           # Header personalizzato
           cat > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" << EOF
--- Complete Database Export
--- Generated: $(date)
--- Database: ${{ env.POSTGRES_DB }}
--- Ready to apply on empty database
+          -- Complete Database Export
+          -- Generated: $(date)
+          -- Database: ${{ env.POSTGRES_DB }}
+          -- Ready to apply on empty database
 
-EOF
+          EOF
           
           echo "==> Exporting schema structures..."
           pg_dump \
@@ -104,13 +103,11 @@ EOF
             --no-owner \
             --no-privileges \
             ${{ env.EXPORT_EXCLUDE_PARAMS }} | \
-          # Rimuovi solo il rumore, mantieni la struttura
           grep -v '^--' | \
           grep -v '^SET ' | \
           grep -v '^SELECT ' | \
           grep -v '^$' | \
-          # Sostituisci CREATE SCHEMA con CREATE SCHEMA IF NOT EXISTS
-          sed 's/^CREATE SCHEMA \(.*\);$/CREATE SCHEMA IF NOT EXISTS \1;/' \
+          sed 's/^CREATE SCHEMA /CREATE SCHEMA IF NOT EXISTS /' \
           >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           
           echo "==> Adding data..."
