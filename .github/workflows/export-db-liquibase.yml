@@ -1,6 +1,10 @@
+
 name: Export Database Schema (Artifacts)
 on:
   workflow_dispatch:
+
+permissions:
+  actions: read
 
 jobs:
   export:
@@ -41,6 +45,7 @@ jobs:
           echo "📁 Export Path: ${{ env.EXPORT_PATH }}"
           echo "🔧 Liquibase Image: ${{ env.LIQUIBASE_DOCKER_IMAGE }}"
           echo "📝 Log Level: ${{ env.LIQUIBASE_LOG_LEVEL }}"
+          echo "🚫 Exclude Params: ${{ env.EXPORT_EXCLUDE_PARAMS }}"
 
       - name: Wait for PostgreSQL
         run: |
@@ -74,6 +79,7 @@ jobs:
             --url=jdbc:postgresql://${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }} \
             --driver=org.postgresql.Driver \
             --classpath=/liquibase/changelog \
+            --log-level=${{ env.LIQUIBASE_LOG_LEVEL }} \
             update
           
           echo "✅ Liquibase migrations completed!"
@@ -96,18 +102,7 @@ jobs:
           mkdir -p ${{ env.EXPORT_PATH }}
           
           echo "==> Exporting table structures..."
-          
-          # Build exclude parameters dynamically
-          EXCLUDE_PARAMS=""
-          IFS=',' read -ra EXCLUDE_TABLES <<< "${{ env.EXPORT_EXCLUDE_TABLES }}"
-          for table in "${EXCLUDE_TABLES[@]}"; do
-            table=$(echo "$table" | xargs)  # trim whitespace
-            if [ -n "$table" ]; then
-              EXCLUDE_PARAMS="$EXCLUDE_PARAMS --exclude-table=$table"
-            fi
-          done
-          
-          echo "Excluding tables: ${{ env.EXPORT_EXCLUDE_TABLES }}"
+          echo "Using exclude params: ${{ env.EXPORT_EXCLUDE_PARAMS }}"
           
           pg_dump \
             -h ${{ env.POSTGRES_HOST }} \
@@ -116,9 +111,10 @@ jobs:
             -d ${{ env.POSTGRES_DB }} \
             --schema-only \
             --no-comments \
-            ${EXCLUDE_PARAMS} | \
-            sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
-            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
+            --no-tablespaces \
+            --no-owner \
+            --no-privileges \
+            ${{ env.EXPORT_EXCLUDE_PARAMS }} > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           
           echo "==> Exporting data..."
           echo -e "\n-- DATA" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
@@ -128,7 +124,8 @@ jobs:
             -U ${{ env.POSTGRES_USER }} \
             -d ${{ env.POSTGRES_DB }} \
             --data-only \
-            ${EXCLUDE_PARAMS} \
+            --no-comments \
+            ${{ env.EXPORT_EXCLUDE_PARAMS }} \
             --column-inserts | \
             grep "^INSERT" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           
@@ -155,5 +152,5 @@ jobs:
           echo "- **Export Path**: ${{ env.EXPORT_PATH }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Liquibase Image**: ${{ env.LIQUIBASE_DOCKER_IMAGE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Retention**: ${{ env.EXPORT_RETENTION_DAYS }} days" >> $GITHUB_STEP_SUMMARY
-          echo "- **Excluded Tables**: ${{ env.EXPORT_EXCLUDE_TABLES }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Excluded**: ${{ env.EXPORT_EXCLUDE_PARAMS }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Files Created**: ✅" >> $GITHUB_STEP_SUMMARY
