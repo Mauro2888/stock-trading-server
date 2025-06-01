@@ -1,4 +1,4 @@
-name: Export Database Schema Commit Push (Liquibase)
+name: Export Database Schema (Commit-push)
 on:
   workflow_dispatch:
 

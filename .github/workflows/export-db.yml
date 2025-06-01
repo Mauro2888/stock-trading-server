@@ -1,4 +1,4 @@
-name: Export Database Schema (Liquibase)
+name: Export Database Schema (Base)
 on:
   workflow_dispatch:
 

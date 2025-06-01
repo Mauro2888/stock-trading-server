@@ -1,0 +1,176 @@
+name: Export Database Schema (Artifacts)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: export_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Load Environment Variables
+        uses: xom9ikk/dotenv@v2.3.0
+        with:
+          path: ./.github/workflows/common-env
+          load-mode: strict
+
+      - name: Display Configuration
+        run: |
+          echo "🗄️  Database: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}"
+          echo "👤 User: ${{ env.POSTGRES_USER }}"
+          echo "📁 Export Path: ${{ env.EXPORT_PATH }}"
+          echo "🔧 Liquibase Image: ${{ env.LIQUIBASE_DOCKER_IMAGE }}"
+          echo "📝 Log Level: ${{ env.LIQUIBASE_LOG_LEVEL }}"
+
+      - name: Wait for PostgreSQL
+        run: |
+          echo "==> Waiting for PostgreSQL service..."
+          timeout_seconds=60
+          start_time=$(date +%s)
+          until pg_isready -h ${{ env.POSTGRES_HOST }} -p ${{ env.POSTGRES_PORT }} -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }}; do
+            current_time=$(date +%s)
+            elapsed_time=$((current_time - start_time))
+            if [ ${elapsed_time} -ge ${timeout_seconds} ]; then
+              echo "❌ Timeout waiting for PostgreSQL."
+              exit 1
+            fi
+            echo "⏳ PostgreSQL is unavailable - sleeping (${elapsed_time}s elapsed)"
+            sleep 2
+          done
+          echo "✅ PostgreSQL is ready!"
+
+      - name: Run Liquibase with Docker
+        run: |
+          echo "==> Running Liquibase migrations..."
+          echo "Using changelog: ${{ env.LIQUIBASE_CHANGELOG_FILE }}"
+          
+          docker run --rm \
+            --network host \
+            -v ${{ github.workspace }}/src/main/resources:${{ env.CHANGELOG_MOUNT_PATH }} \
+            ${{ env.LIQUIBASE_DOCKER_IMAGE }} \
+            --changeLogFile=${{ env.LIQUIBASE_CHANGELOG_FILE }} \
+            --username=${{ env.POSTGRES_USER }} \
+            --password=${{ env.POSTGRES_PASSWORD }} \
+            --url=jdbc:postgresql://${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }} \
+            --driver=org.postgresql.Driver \
+            --classpath=${{ env.CHANGELOG_MOUNT_PATH }} \
+            --log-level=${{ env.LIQUIBASE_LOG_LEVEL }} \
+            update
+          
+          echo "✅ Liquibase migrations completed!"
+
+      - name: Verify Database State
+        run: |
+          echo "==> Verifying database state..."
+          echo "📊 Tables created:"
+          psql -h ${{ env.POSTGRES_HOST }} -p ${{ env.POSTGRES_PORT }} -U ${{ env.POSTGRES_USER }} -d ${{ env.POSTGRES_DB }} -c "
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name;
+          "
+
+      - name: Export Database Schema
+        env:
+          PGHOST: ${{ env.POSTGRES_HOST }}
+          PGUSER: ${{ env.POSTGRES_USER }}
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          PGDATABASE: ${{ env.POSTGRES_DB }}
+          PGPORT: ${{ env.POSTGRES_PORT }}
+        run: |
+          echo "==> Exporting database schema..."
+          
+          TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+          OUTPUT_FILE="${{ env.EXPORT_FILE_PREFIX }}-${TIMESTAMP}.sql"
+          LATEST_FILE="${{ env.EXPORT_FILE_PREFIX }}-latest.sql"
+          
+          # Create export directory
+          mkdir -p ${{ env.EXPORT_PATH }}
+          
+          echo "==> Exporting table structures..."
+          
+          # Build exclude parameters dynamically
+          EXCLUDE_PARAMS=""
+          IFS=',' read -ra EXCLUDE_TABLES <<< "${{ env.EXPORT_EXCLUDE_TABLES }}"
+          for table in "${EXCLUDE_TABLES[@]}"; do
+            table=$(echo "$table" | xargs)  # trim whitespace
+            if [ -n "$table" ]; then
+              EXCLUDE_PARAMS="$EXCLUDE_PARAMS --exclude-table=$table"
+            fi
+          done
+          
+          echo "Excluding tables: ${{ env.EXPORT_EXCLUDE_TABLES }}"
+          
+          pg_dump \
+            -h ${{ env.POSTGRES_HOST }} \
+            -p ${{ env.POSTGRES_PORT }} \
+            -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DB }} \
+            --schema-only \
+            --no-comments \
+            ${EXCLUDE_PARAMS} | \
+            sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
+            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
+          
+          echo "==> Exporting data..."
+          echo -e "\n-- DATA" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
+          pg_dump \
+            -h ${{ env.POSTGRES_HOST }} \
+            -p ${{ env.POSTGRES_PORT }} \
+            -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DB }} \
+            --data-only \
+            ${EXCLUDE_PARAMS} \
+            --column-inserts | \
+            grep "^INSERT" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
+          
+          # Create latest version
+          cp "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" "${{ env.EXPORT_PATH }}/${LATEST_FILE}"
+          
+          echo "✅ Export completed!"
+          echo "📁 Files created:"
+          ls -la ${{ env.EXPORT_PATH }}/
+          echo "📏 File size: $(du -h "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" | cut -f1)"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: '${{ env.EXPORT_FILE_PREFIX }}-${{ github.run_number }}'
+          path: ${{ env.EXPORT_PATH }}/*.sql
+          retention-days: ${{ env.EXPORT_RETENTION_DAYS }}
+
+      - name: Summary
+        run: |
+          echo "## 📊 Export Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database**: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Export Path**: ${{ env.EXPORT_PATH }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Liquibase Image**: ${{ env.LIQUIBASE_DOCKER_IMAGE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Retention**: ${{ env.EXPORT_RETENTION_DAYS }} days" >> $GITHUB_STEP_SUMMARY
+          echo "- **Excluded Tables**: ${{ env.EXPORT_EXCLUDE_TABLES }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files Created**: ✅" >> $GITHUB_STEP_SUMMARY
