@@ -1,4 +1,4 @@
-name: Export Liquibase
+name: Export Database Schema
 on:
   workflow_dispatch:
 
@@ -20,47 +20,56 @@ jobs:
         ports:
           - 5432:5432
     
-        
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Load Common Environment Variables
+          
+      - name: Load Environment
         uses: xom9ikk/dotenv@v2.3.0
         with:
-          path: ./.github/workflows/common-env
-          load-mode: strict
+          path: ./common-env/.env
 
-      - name: Setup JDK
+      - name: Setup JDK (for Liquibase)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-          cache: maven
 
-      - name: Debug file structure
+      - name: Debug and fix changelog
         run: |
           echo "📁 Current directory: $(pwd)"
-          echo "📂 Checking file structure..."
-          find . -name "*.yml" -o -name "*.yaml" | head -10
-          echo ""
-          echo "📋 Looking for master changelog..."
-          ls -la src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
-          echo ""
-          echo "📁 Database directory contents:"
+          echo "📂 Database directory contents:"
           find src/main/resources/db -type f | head -10
+          echo ""
+          echo "📋 Master changelog content BEFORE fix:"
+          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
+          echo ""
+          
+          # Fix the path in changelog if it has absolute path
+          if grep -q 'path: "/db/changelog"' src/main/resources/db/db-changelog-master.yml 2>/dev/null; then
+            echo "🔧 Fixing absolute path to relative path..."
+            sed -i 's|path: "/db/changelog"|path: "db/changelog"|g' src/main/resources/db/db-changelog-master.yml
+            echo "✅ Fixed path from '/db/changelog' to 'db/changelog'"
+          else
+            echo "ℹ️ Path looks correct or file not found"
+          fi
+          
+          echo ""
+          echo "📋 Master changelog content AFTER fix:"
+          cat src/main/resources/db/db-changelog-master.yml || echo "❌ Master changelog not found"
+          echo ""
+          echo "📁 Changelog directory contents:"
+          ls -la src/main/resources/db/changelog/ 2>/dev/null || echo "No changelog directory found"
 
       - name: Apply Liquibase migrations
         run: |
           echo "🔄 Applying Liquibase migrations..."
-          echo "📋 Using changelog: ${{ env.LIQUIBASE_CHANGELOG_FILE }}"
+          echo "📋 Using changelog: src/main/resources/db/db-changelog-master.yml"
           
           mvn liquibase:update \
-            -Dliquibase.changeLogFile="${{ env.LIQUIBASE_CHANGELOG_FILE }}" \
-            -Dliquibase.url="jdbc:postgresql://localhost:5432/${{ env.POSTGRES_DB }}" \
+            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
+            -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
             -Dliquibase.username="postgres" \
             -Dliquibase.password="postgres" \
             -Dliquibase.verbose=true
