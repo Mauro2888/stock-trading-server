@@ -1,3 +1,7 @@
+--liquibase formatted sql
+
+--changeset github-action:002-users
+--comment: Auto-converted 002-users
 create schema if not exists users;
 
 create table if not exists users

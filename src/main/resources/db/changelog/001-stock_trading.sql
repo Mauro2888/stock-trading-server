@@ -1,3 +1,8 @@
+--liquibase formatted sql
+
+--changeset github-action:001-stock_trading
+--comment: Auto-converted 001-stock_trading
+
 create schema if not exists stock_trading;
 
 create table if not exists stock
