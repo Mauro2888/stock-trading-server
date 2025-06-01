@@ -119,16 +119,20 @@ jobs:
                 yaml_file="src/main/resources/db/changelog/${base_name}.yml"
                 
                 echo "📝 Creating: $yaml_file"
-                cat > "$yaml_file" << EOF
-databaseChangeLog:
-  - changeSet:
-      id: ${base_name}
-      author: github-action
-      changes:
-        - sqlFile:
-            path: ${base_name}.sql
-            relativeToChangelogFile: true
-EOF
+                cat > "$yaml_file" << 'EOL'
+          databaseChangeLog:
+            - changeSet:
+                id: CHANGESET_ID
+                author: github-action
+                changes:
+                  - sqlFile:
+                      path: SQL_FILE_NAME.sql
+                      relativeToChangelogFile: true
+          EOL
+                
+                # Replace placeholders
+                sed -i "s/CHANGESET_ID/${base_name}/g" "$yaml_file"
+                sed -i "s/SQL_FILE_NAME/${base_name}/g" "$yaml_file"
               fi
             done
             
