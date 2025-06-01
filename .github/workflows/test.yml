@@ -1,186 +1,175 @@
+# .github/workflows/export-database-schema.yml
 name: Export Database Schema (Generic)
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   export:
     runs-on: ubuntu-22.04
-    
+
     services:
       postgres:
         image: postgres:14
         env:
-          POSTGRES_USER: postgres
+          POSTGRES_USER: postgres # This will be used by Liquibase and pg_dump
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres  # Always start with default postgres db
-        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+          POSTGRES_DB: export_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
         ports:
+          # The job runner will be able to access postgres on localhost:<randomly-assigned-port>
+          # This <randomly-assigned-port> is what job.services.postgres.ports[5432] will resolve to.
           - 5432:5432
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-          
-      - name: Load Environment Variables
+          token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if you need to trigger other workflows, etc.
+          fetch-depth: 0 # Necessary for some CI scenarios, Liquibase usually doesn't need full history
+
+      - name: Load Common Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
+        id: dotenv # Give it an id to access outputs if needed, though direct env var usage is common
         with:
-          path: ./.github/workflows/common-env
+          path: ./.github/workflows/common-env # Ensure this file sets POSTGRES_HOST (likely 'localhost'), POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, SQL_SOURCE_PATH, EXPORT_PATH etc.
           load-mode: strict
-          
-      - name: Setup JDK (for Liquibase)
+
+      - name: Setup Java and Maven
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '17' # Specify your project's Java version
+          distribution: 'temurin' # Or 'adopt', 'zulu', etc.
+          cache: 'maven' # Cache Maven dependencies
 
-      - name: Debug Liquibase configuration
-        run: |
-          echo "🔍 Debugging Liquibase setup differences..."
-          echo "📁 Current directory: $(pwd)"
-          echo ""
-          echo "📂 Exact file structure:"
-          find src/main/resources/db -type f -exec ls -la {} \;
-          echo ""
-          echo "📋 Master changelog content:"
-          cat src/main/resources/db/db-changelog-master.yml
-          echo ""
-          echo "📁 Changelog directory exact contents:"
-          ls -la src/main/resources/db/changelog/
-          echo ""
-          echo "🔧 Maven Liquibase plugin version:"
-          mvn help:describe -Dplugin=org.liquibase:liquibase-maven-plugin -Ddetail=true | grep -A5 -B5 "Version"
-          echo ""
-          echo "📦 Spring Boot Liquibase dependency:"
-          mvn dependency:tree | grep -i liquibase
-          echo ""
-          echo "☕ Java versions:"
-          echo "Maven Java: $(mvn -version | grep 'Java version')"
-          echo "Runtime Java: $(java -version 2>&1 | head -1)"
-          echo ""
-          echo "🔧 Maven effective settings:"
-          mvn help:effective-settings | grep -A10 -B10 liquibase || echo "No liquibase settings found"
-      - name: Setup target database
-        run: |
-          echo "🔧 Debug PostgreSQL connection..."
-          echo "User: $(whoami)"
-          echo "PostgreSQL process:"
-          ps aux | grep postgres || echo "No postgres process found"
+      - name: Setup Export DB with Liquibase
+        env:
+          # These env vars are set from the 'common-env' file via the dotenv action
+          # and are available here.
+          # For clarity, we re-state which ones Liquibase/pg_dump will use.
+          # PGHOST should be 'localhost' as the service is mapped to the runner's network.
+          # If common-env sets POSTGRES_HOST to 'postgres' (the service name), that might also work
+          # due to Docker networking, but 'localhost' is explicit for the port mapping.
+          DB_HOST: ${{ env.POSTGRES_HOST }} # Expects 'localhost' or 127.0.0.1 from common-env
+          DB_USER: ${{ env.POSTGRES_USER }}
+          DB_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          DB_NAME: ${{ env.POSTGRES_DB }}
+          DB_PORT: ${{ job.services.postgres.ports[5432] }} # Dynamically assigned port on the runner
           
-          echo "⏳ Waiting for PostgreSQL..."
-          for i in {1..30}; do
-            if pg_isready -h localhost -p 5432 -U postgres; then
-              echo "✅ PostgreSQL is ready!"
-              break
+          # === CRITICAL: Path to your Liquibase master changelog file ===
+          # Adjust this path. It should point to your main Liquibase changelog file.
+          # Example: If SQL_SOURCE_PATH from common-env is 'src/main/resources/db/changelog'
+          # and your master file is 'db.changelog-master.xml' inside it:
+          LIQUIBASE_CHANGELOG_FILE: ${{ env.SQL_SOURCE_PATH }}/db.changelog-master.yml
+          # If SQL_SOURCE_PATH is just 'db/migrations' and master is 'master.xml' in it:
+          # LIQUIBASE_CHANGELOG_FILE: ${{ env.SQL_SOURCE_PATH }}/master.xml
+        run: |
+          echo "==> Waiting for PostgreSQL service to be ready..."
+          # Add a loop to wait for Postgres, as health-check in service definition might not be enough for immediate connection
+          timeout_seconds=60
+          start_time=$(date +%s)
+          until pg_isready -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}"; do
+            current_time=$(date +%s)
+            elapsed_time=$((current_time - start_time))
+            if [ ${elapsed_time} -ge ${timeout_seconds} ]; then
+              echo "Timeout waiting for PostgreSQL."
+              exit 1
             fi
-            echo "Waiting... (attempt $i/30)"
+            echo "PostgreSQL is unavailable - sleeping"
             sleep 2
           done
-          
-          echo "📋 Testing basic connection..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "SELECT current_user, current_database();"
-          
-          echo "🗄️ Creating export database..."
-          PGPASSWORD=postgres createdb -h localhost -U postgres export_db
-          
-          echo "🔌 Testing new database connection..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d export_db -c "SELECT version();"
-          
-          echo "📊 Listing databases..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "\l"
+          echo "==> PostgreSQL is ready."
 
-      - name: Try different Liquibase approach
-        run: |
-          echo "🔄 Testing different Liquibase approaches..."
+          echo "==> Applying database migrations with Liquibase..."
+          echo "Using changelog file: ${LIQUIBASE_CHANGELOG_FILE}"
           
-          # Approach 1: Try with explicit driver
-          echo "📋 Approach 1: Maven plugin with explicit driver"
-          if mvn liquibase:update \
-            -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
-            -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
-            -Dliquibase.username="postgres" \
-            -Dliquibase.password="postgres" \
-            -Dliquibase.driver="org.postgresql.Driver" \
-            -Dliquibase.verbose=true; then
-            echo "✅ Approach 1 succeeded!"
-          else
-            echo "❌ Approach 1 failed, trying fallback..."
-            
-            # Fallback: Create YAML wrappers for SQL files
-            echo "🔧 Creating Liquibase YAML wrappers..."
-            for sql_file in src/main/resources/db/changelog/*.sql; do
-              if [ -f "$sql_file" ]; then
-                base_name=$(basename "$sql_file" .sql)
-                yaml_file="src/main/resources/db/changelog/${base_name}.yml"
-                
-                echo "📝 Creating: $yaml_file"
-                cat > "$yaml_file" << 'EOL'
-          databaseChangeLog:
-            - changeSet:
-                id: CHANGESET_ID
-                author: github-action
-                changes:
-                  - sqlFile:
-                      path: SQL_FILE_NAME.sql
-                      relativeToChangelogFile: true
-          EOL
-                
-                # Replace placeholders
-                sed -i "s/CHANGESET_ID/${base_name}/g" "$yaml_file"
-                sed -i "s/SQL_FILE_NAME/${base_name}/g" "$yaml_file"
-              fi
-            done
-            
-            echo "📋 Retrying with YAML wrappers..."
-            mvn liquibase:update \
-              -Dliquibase.changeLogFile="src/main/resources/db/db-changelog-master.yml" \
-              -Dliquibase.url="jdbc:postgresql://localhost:5432/export_db" \
-              -Dliquibase.username="postgres" \
-              -Dliquibase.password="postgres" \
-              -Dliquibase.driver="org.postgresql.Driver" \
-              -Dliquibase.verbose=true
-          fi
+          # Ensure your pom.xml has the liquibase-maven-plugin and postgresql driver configured
+          mvn liquibase:update \
+            -Dliquibase.driver=org.postgresql.Driver \
+            -Dliquibase.url="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}" \
+            -Dliquibase.username="${DB_USER}" \
+            -Dliquibase.password="${DB_PASSWORD}" \
+            -Dliquibase.changeLogFile="${LIQUIBASE_CHANGELOG_FILE}" \
+            -Dliquibase.verbose=true \
+            -Dliquibase.showSummary=true \
+            -Dliquibase.logging=INFO \
+            -Dliquibase.contexts="${{ env.LIQUIBASE_CONTEXTS || '' }}" # Optional: if you use contexts
+            # Add any other Liquibase properties you need, e.g., -Dliquibase.labels
+            # If your pom.xml already configures these via <configuration> block, 
+            # some -D properties here might be redundant but will override pom settings.
           
-          echo ""
-          echo "📋 Checking if tables were created..."
-          PGPASSWORD=postgres psql -h localhost -U postgres -d export_db -c "\dt" || echo "No tables found"
+          echo "==> Liquibase update complete."
 
-      - name: Export schema
+      - name: Export database schema
+        env:
+          # pg_dump uses standard PG* environment variables if set.
+          # These are already set by the 'dotenv' action if they are in your common-env file
+          # and named POSTGRES_USER, POSTGRES_PASSWORD etc.
+          # For clarity and to ensure pg_dump uses the service connection:
+          PGHOST: ${{ env.POSTGRES_HOST }} # Should be 'localhost'
+          PGUSER: ${{ env.POSTGRES_USER }}
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          PGDATABASE: ${{ env.POSTGRES_DB }}
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
         run: |
+          echo "==> Exporting database schema..."
+          
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
-          OUTPUT="database-schema-${TIMESTAMP}.sql"
+          OUTPUT_FILE="database-schema-${TIMESTAMP}.sql"
+          LATEST_FILE="database-schema-latest.sql"
+          EXPORT_DIR="${{ env.EXPORT_PATH }}" # Ensure EXPORT_PATH is defined in common-env, e.g., "db_exports"
+          
+          # Create export directory if it doesn't exist
+          mkdir -p "${EXPORT_DIR}"
+          
+          FULL_OUTPUT_FILE_PATH="${EXPORT_DIR}/${OUTPUT_FILE}"
+          FULL_LATEST_FILE_PATH="${EXPORT_DIR}/${LATEST_FILE}"
 
-          mkdir -p exports
-
-          # Export schema
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
-            --schema-only --no-comments \
-            --exclude-table=databasechangelog --exclude-table=databasechangeloglock | \
+          echo "==> Exporting final table structures to ${FULL_OUTPUT_FILE_PATH}..."
+          # PGPASSWORD is set in the env block for this step
+          pg_dump \
+            -h "${PGHOST}" \
+            -p "${PGPORT}" \
+            -U "${PGUSER}" \
+            -d "${PGDATABASE}" \
+            --schema-only \
+            --no-comments \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock | \
             sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
-            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "$OUTPUT"
+            awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "${FULL_OUTPUT_FILE_PATH}"
+          
+          echo "==> Exporting INSERT data..."
+          echo -e "\n-- DATA" >> "${FULL_OUTPUT_FILE_PATH}"
+          # PGPASSWORD is set in the env block for this step
+          pg_dump \
+            -h "${PGHOST}" \
+            -p "${PGPORT}" \
+            -U "${PGUSER}" \
+            -d "${PGDATABASE}" \
+            --data-only \
+            --exclude-table=databasechangelog \
+            --exclude-table=databasechangeloglock \
+            --column-inserts | \
+            grep "^INSERT" >> "${FULL_OUTPUT_FILE_PATH}"
+          
+          # --> Also create a "latest" version
+          cp "${FULL_OUTPUT_FILE_PATH}" "${FULL_LATEST_FILE_PATH}"
+          
+          echo "==> Timestamped file: ${FULL_OUTPUT_FILE_PATH} ($(du -h "${FULL_OUTPUT_FILE_PATH}" | cut -f1))"
+          echo "==> Latest file: ${FULL_LATEST_FILE_PATH}"
 
-          # Export data
-          echo -e "\n-- DATA" >> "$OUTPUT"
-          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d export_db \
-            --data-only --exclude-table=databasechangelog --exclude-table=databasechangeloglock \
-            --column-inserts | grep "^INSERT" >> "$OUTPUT"
-
-          mv "$OUTPUT" exports/
-
-      - name: Commit and upload
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add exports/
-          git commit -m "Database export $(date)" || true
-          git push || true
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: database-schema-${{ github.run_number }}
-          path: exports/*.sql
+          name: 'database-schema-${{ github.run_number }}'
+          # Ensure EXPORT_PATH is defined in common-env and matches the directory used above
+          path: ${{ env.EXPORT_PATH }}/*.sql 
+          retention-days: ${{ env.EXPORT_RETENTION_DAYS || '30' }}
