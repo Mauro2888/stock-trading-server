@@ -55,16 +55,19 @@ jobs:
           done
           echo "==> PostgreSQL is ready."
 
-      - name: Run Liquibase Update
-        uses: liquibase/liquibase-github-action@v4
-        with:
-          operation: 'update'
-          classpath: 'src/main/resources'
-          changeLogFile: 'db/db.changelog-master.yml'
-          username: 'postgres'
-          password: 'postgres'
-          url: 'jdbc:postgresql://localhost:5432/export_db'
-          driver: 'org.postgresql.Driver'
+      - name: Run Liquibase with Docker
+        run: |
+          docker run --rm \
+            --network host \
+            -v ${{ github.workspace }}/src/main/resources:/liquibase/changelog \
+            liquibase/liquibase:4.29 \
+            --changeLogFile=db/db.changelog-master.yml \
+            --username=postgres \
+            --password=postgres \
+            --url=jdbc:postgresql://localhost:5432/export_db \
+            --driver=org.postgresql.Driver \
+            --classpath=/liquibase/changelog \
+            update
 
       - name: Export database schema
         env:
