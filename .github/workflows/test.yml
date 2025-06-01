@@ -1,4 +1,4 @@
-name: Export Database Schema (Generic Action)
+name: Export Database Schema (Generic Liquibase)
 on:
   workflow_dispatch:
 
@@ -28,6 +28,9 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Load Common Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
@@ -35,14 +38,31 @@ jobs:
           path: ./.github/workflows/common-env
           load-mode: strict
 
+      - name: Wait for PostgreSQL
+        run: |
+          echo "==> Waiting for PostgreSQL service to be ready..."
+          timeout_seconds=60
+          start_time=$(date +%s)
+          until pg_isready -h localhost -p 5432 -U postgres -d export_db; do
+            current_time=$(date +%s)
+            elapsed_time=$((current_time - start_time))
+            if [ ${elapsed_time} -ge ${timeout_seconds} ]; then
+              echo "Timeout waiting for PostgreSQL."
+              exit 1
+            fi
+            echo "PostgreSQL is unavailable - sleeping"
+            sleep 2
+          done
+          echo "==> PostgreSQL is ready."
+
       - name: Run Liquibase Update
         uses: liquibase/liquibase-github-action@v4
         with:
           operation: 'update'
           classpath: 'src/main/resources'
           changeLogFile: 'db/db.changelog-master.yml'
-          username: postgres
-          password: postgres
+          username: 'postgres'
+          password: 'postgres'
           url: 'jdbc:postgresql://localhost:5432/export_db'
           driver: 'org.postgresql.Driver'
 
@@ -54,12 +74,15 @@ jobs:
           PGDATABASE: export_db
           PGPORT: 5432
         run: |
-          # Your existing export logic here
           echo "==> Exporting database schema..."
+          
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
           OUTPUT_FILE="database-schema-${TIMESTAMP}.sql"
+          
+          # Create export directory
           mkdir -p ${{ env.EXPORT_PATH }}
           
+          echo "==> Exporting final table structures..."
           pg_dump \
             -h localhost \
             -p 5432 \
@@ -72,6 +95,7 @@ jobs:
             sed '/^SET /d; /^SELECT /d; /^--/d; /^$/d; /^ALTER TABLE.*OWNER/d' | \
             awk '/^CREATE TABLE/,/^);/ {print} /^ALTER TABLE.*ADD CONSTRAINT/ {print} /^CREATE.*INDEX/ {print}' > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           
+          echo "==> Exporting INSERT data..."
           echo -e "\n-- DATA" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           pg_dump \
             -h localhost \
@@ -84,7 +108,14 @@ jobs:
             --column-inserts | \
             grep "^INSERT" >> "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}"
           
+          # Create latest version
           cp "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" "${{ env.EXPORT_PATH }}/database-schema-latest.sql"
+          
+          echo "==> Files created:"
+          ls -la ${{ env.EXPORT_PATH }}/
+          
+          echo "==> Timestamped file: ${OUTPUT_FILE} ($(du -h "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" | cut -f1))"
+          echo "==> Latest file: database-schema-latest.sql"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
