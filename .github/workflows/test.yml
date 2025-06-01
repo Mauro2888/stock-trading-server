@@ -20,15 +20,19 @@ jobs:
         ports:
           - 5432:5432
     
+        
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Load Environment
+          fetch-depth: 0
+
+      - name: Load Common Environment Variables
         uses: xom9ikk/dotenv@v2.3.0
         with:
-          path: ./common-env/.env
+          path: ./.github/workflows/common-env
+          load-mode: strict
 
       - name: Setup JDK
         uses: actions/setup-java@v4
