@@ -39,16 +39,12 @@ jobs:
 
       - name: Display Configuration
         run: |
-          echo "🗄️  Database: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}"
-          echo "👤 User: ${{ env.POSTGRES_USER }}"
-          echo "📁 Export Path: ${{ env.EXPORT_PATH }}"
-          echo "🔧 Liquibase Image: ${{ env.LIQUIBASE_DOCKER_IMAGE }}"
-          echo "📝 Log Level: ${{ env.LIQUIBASE_LOG_LEVEL }}"
-          echo "🚫 Exclude Params: ${{ env.EXPORT_EXCLUDE_PARAMS }}"
+          echo "Database: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}"
+          echo "Export Path: ${{ env.EXPORT_PATH }}"
+          echo "Exclude Params: ${{ env.EXPORT_EXCLUDE_PARAMS }}"
 
       - name: Run Liquibase with Docker
         run: |
-          echo "==> Running Liquibase migrations..."
           echo "Using changelog: ${{ env.LIQUIBASE_CHANGELOG_FILE }}"
           
           docker run --rm \
@@ -64,7 +60,7 @@ jobs:
             --log-level=${{ env.LIQUIBASE_LOG_LEVEL }} \
             update
           
-          echo "✅ Liquibase migrations completed!"
+          echo "===> Liquibase migrations completed!"
 
       - name: Export Database Schema
         env:
@@ -74,24 +70,20 @@ jobs:
           PGDATABASE: ${{ env.POSTGRES_DB }}
           PGPORT: ${{ env.POSTGRES_PORT }}
         run: |
-          echo "==> Creating complete, clean database dump..."
-          
+
           TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
           OUTPUT_FILE="${{ env.EXPORT_FILE_PREFIX }}-${TIMESTAMP}.sql"
           LATEST_FILE="${{ env.EXPORT_FILE_PREFIX }}-latest.sql"
           
           mkdir -p ${{ env.EXPORT_PATH }}
           
-          # Header personalizzato
+          # Header TO BE IMPROVED -> NOW I ATTACH ONLY FEW INFO IN THE HEADER SQL
           cat > "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" << EOF
-          -- Complete Database Export
+          -- Complete Database Snapshot
           -- Generated: $(date)
-          -- Database: ${{ env.POSTGRES_DB }}
-          -- Ready to apply on empty database
-
           EOF
           
-          echo "==> Exporting schema structures..."
+          echo "==> Exporting schema..."
           pg_dump \
             -h ${{ env.POSTGRES_HOST }} \
             -p ${{ env.POSTGRES_PORT }} \
@@ -126,11 +118,6 @@ jobs:
           # Create latest version
           cp "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" "${{ env.EXPORT_PATH }}/${LATEST_FILE}"
           
-          echo "✅ Export completed!"
-          echo "📁 Files created:"
-          ls -la ${{ env.EXPORT_PATH }}/
-          echo "📏 File size: $(du -h "${{ env.EXPORT_PATH }}/${OUTPUT_FILE}" | cut -f1)"
-
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -138,13 +125,9 @@ jobs:
           path: ${{ env.EXPORT_PATH }}/*.sql
           retention-days: ${{ env.EXPORT_RETENTION_DAYS }}
 
-      - name: Summary
+      - name: Summary # TODO to be improved
         run: |
-          echo "## 📊 Export Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Export Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Database**: ${{ env.POSTGRES_HOST }}:${{ env.POSTGRES_PORT }}/${{ env.POSTGRES_DB }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Export Path**: ${{ env.EXPORT_PATH }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Liquibase Image**: ${{ env.LIQUIBASE_DOCKER_IMAGE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Retention**: ${{ env.EXPORT_RETENTION_DAYS }} days" >> $GITHUB_STEP_SUMMARY
           echo "- **Excluded**: ${{ env.EXPORT_EXCLUDE_PARAMS }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Files Created**: ✅" >> $GITHUB_STEP_SUMMARY
