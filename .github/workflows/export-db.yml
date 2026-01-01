@@ -91,7 +91,7 @@ jobs:
           echo "==> Latest file: database-schema-latest.sql"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: 'database-schema-${{ github.run_number }}'
           path: ${{env.EXPORT_PATH}}/*.sql
